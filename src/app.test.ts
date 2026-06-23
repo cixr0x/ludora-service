@@ -85,6 +85,8 @@ describe('ludora service', () => {
     expect(sql).toContain('left join front_page_category_items fpci');
     expect(sql).toContain('left join active_item i');
     expect(sql).toContain('jsonb_agg');
+    expect(sql).toContain("'has_approved_listing', i.has_approved_listing");
+    expect(sql).toContain("'is_expansion', i.is_expansion");
     expect(sql).toContain('order by fpc."order" asc, fpc.id asc');
     expect(sql).not.toContain('select *');
   });
@@ -119,6 +121,8 @@ describe('ludora service', () => {
     });
     const sql = normalizeSql(queries[0]?.sql ?? '');
     expect(sql).toContain('from active_item i');
+    expect(sql).toContain('i.has_approved_listing');
+    expect(sql).toContain('i.is_expansion');
     expect(sql).toContain('left join lateral');
     expect(sql).toContain('from item_categories ic');
     expect(sql).toContain('from item_mechanics im');

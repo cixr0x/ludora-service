@@ -132,6 +132,8 @@ const itemSelect = `
   i.image_url,
   i.image_url_es,
   i.status,
+  i.has_approved_listing,
+  i.is_expansion,
   i.created_at,
   i.updated_at
 `;
@@ -308,7 +310,9 @@ const frontPageSql = `
           'max_players', i.max_players,
           'min_minutes', i.min_minutes,
           'max_minutes', i.max_minutes,
-          'complexity', i.complexity
+          'complexity', i.complexity,
+          'has_approved_listing', i.has_approved_listing,
+          'is_expansion', i.is_expansion
         )
         order by fpci.item_order asc, i.canonical_name asc, i.id asc
       ) filter (where i.id is not null),
