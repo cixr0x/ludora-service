@@ -62,6 +62,7 @@ describe('ludora service', () => {
             image_url: 'https://cdn.example/coffee.jpg',
             image_url_es: 'https://cdn.example/cafe.jpg',
             item_type: 'base_game',
+            rating: '7.37125',
             year_published: 2023
           }
         ],
@@ -85,6 +86,7 @@ describe('ludora service', () => {
     expect(sql).toContain('left join front_page_category_items fpci');
     expect(sql).toContain('left join active_item i');
     expect(sql).toContain('jsonb_agg');
+    expect(sql).toContain("'rating', i.rating");
     expect(sql).toContain("'has_approved_listing', i.has_approved_listing");
     expect(sql).toContain("'is_expansion', i.is_expansion");
     expect(sql).toContain('order by fpc."order" asc, fpc.id asc');
@@ -97,7 +99,8 @@ describe('ludora service', () => {
         canonical_name: 'Coffee Rush',
         categories: [{ id: 5, name: 'Party Game', name_es: 'Juego de fiesta' }],
         id: 77,
-        mechanics: [{ id: 8, name: 'Action Drafting', name_es: 'Seleccion de acciones' }]
+        mechanics: [{ id: 8, name: 'Action Drafting', name_es: 'Seleccion de acciones' }],
+        rating: '7.37125'
       }
     ];
     const queries: Array<{ params?: unknown[]; sql: string }> = [];
@@ -121,6 +124,7 @@ describe('ludora service', () => {
     });
     const sql = normalizeSql(queries[0]?.sql ?? '');
     expect(sql).toContain('from active_item i');
+    expect(sql).toContain('i.rating');
     expect(sql).toContain('i.has_approved_listing');
     expect(sql).toContain('i.is_expansion');
     expect(sql).toContain('left join lateral');
@@ -138,6 +142,7 @@ describe('ludora service', () => {
         categories: [{ id: 5, name: 'Animals', name_es: 'Animales' }],
         id: 77,
         mechanics: [{ id: 8, name: 'Tile Placement', name_es: 'Colocacion de losetas' }],
+        rating: '7.2',
         semantic_distance: '0.12'
       }
     ];
@@ -172,6 +177,7 @@ describe('ludora service', () => {
     const sql = normalizeSql(queries[0]?.sql ?? '');
     expect(sql).toContain('from item_search_embeddings ise');
     expect(sql).toContain('join active_item i on i.id = ise.item_id');
+    expect(sql).toContain('i.rating');
     expect(sql).toContain('ise.embedding <=> $1::vector');
     expect(sql).toContain('where ise.model = $2');
     expect(sql).toContain('from item_categories ic');
@@ -222,6 +228,7 @@ describe('ludora service', () => {
       mechanics: [{ id: 8, name: 'Action Drafting', name_es: 'Seleccion de acciones' }],
       offers: [{ id: 300, store_name: 'Central de Juegos' }],
       publishers: [{ id: 11, name: 'Pythagoras' }],
+      rating: '7.37125',
       tutorials: [{ id: 9, source: 'youtube', title: 'Como jugar', url: 'https://youtube.example' }]
     };
     const queries: Array<{ params?: unknown[]; sql: string }> = [];
@@ -238,6 +245,7 @@ describe('ludora service', () => {
     expect(response.body).toEqual({ data: row });
     const sql = normalizeSql(queries[0]?.sql ?? '');
     expect(sql).toContain('from active_item i');
+    expect(sql).toContain('i.rating');
     expect(sql).toContain('from item_contributors ic');
     expect(sql).toContain("ic.contribution_role = 'designer'");
     expect(sql).toContain('from item_publishers ip');
