@@ -136,6 +136,26 @@ describe('ludora service', () => {
     expect(queries[0]?.params).toEqual(['%coffee%', 12, 3]);
   });
 
+  it('splits text search into independent partial title tokens', async () => {
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows: [] };
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items?q=sea%20ext&limit=12');
+
+    expect(response.status).toBe(200);
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    const searchableTitleSql =
+      "concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es)";
+    expect(sql).toContain(`${searchableTitleSql} ilike $1 escape '\\'`);
+    expect(sql).toContain(`${searchableTitleSql} ilike $2 escape '\\'`);
+    expect(queries[0]?.params).toEqual(['%sea%', '%ext%', 12, 0]);
+  });
+
   it('lists only approved listed items using public search filters', async () => {
     const rows = [
       {

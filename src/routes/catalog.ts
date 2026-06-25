@@ -344,6 +344,8 @@ type ItemSearchFilters = {
 function buildItemsQuery(filters: ItemSearchFilters): { params: unknown[]; sql: string } {
   const params: unknown[] = [];
   const whereSql: string[] = ['i.has_approved_listing = true'];
+  const searchableTitleSql =
+    "concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es)";
 
   function addParam(value: unknown): string {
     params.push(value);
@@ -351,10 +353,10 @@ function buildItemsQuery(filters: ItemSearchFilters): { params: unknown[]; sql: 
   }
 
   if (filters.query) {
-    const queryPlaceholder = addParam(likePattern(filters.query));
-    whereSql.push(
-      `concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es) ilike ${queryPlaceholder} escape '\\'`
-    );
+    for (const term of searchTerms(filters.query)) {
+      const queryPlaceholder = addParam(likePattern(term));
+      whereSql.push(`${searchableTitleSql} ilike ${queryPlaceholder} escape '\\'`);
+    }
   }
 
   if (filters.players !== undefined) {
@@ -695,6 +697,10 @@ function integerPathParam(value: string | undefined): number {
 
 function likePattern(value: string): string {
   return `%${value.replace(/[\\%_]/g, (match) => `\\${match}`)}%`;
+}
+
+function searchTerms(value: string): string[] {
+  return Array.from(new Set(value.split(/\s+/).map((term) => term.trim()).filter(Boolean)));
 }
 
 function vectorLiteral(values: number[]): string {
