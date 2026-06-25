@@ -127,12 +127,82 @@ describe('ludora service', () => {
     expect(sql).toContain('i.rating');
     expect(sql).toContain('i.has_approved_listing');
     expect(sql).toContain('i.is_expansion');
+    expect(sql).toContain('i.has_approved_listing = true');
     expect(sql).toContain('left join lateral');
     expect(sql).toContain('from item_categories ic');
     expect(sql).toContain('from item_mechanics im');
-    expect(sql).toContain("where concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es) ilike $1 escape '\\'");
+    expect(sql).toContain("concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es) ilike $1 escape '\\'");
     expect(sql).toContain('order by i.canonical_name asc, i.id asc');
     expect(queries[0]?.params).toEqual(['%coffee%', 12, 3]);
+  });
+
+  it('lists only approved listed items using public search filters', async () => {
+    const rows = [
+      {
+        canonical_name: 'Coffee Rush: Extra Shot',
+        categories: [{ id: 5, name: 'Party Game', name_es: 'Juego de fiesta' }],
+        id: 77,
+        is_expansion: true,
+        mechanics: [{ id: 8, name: 'Action Drafting', name_es: 'Seleccion de acciones' }],
+        rating: '7.37125'
+      }
+    ];
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows };
+      }
+    };
+
+    const response = await request(createApp({ database })).get(
+      '/api/items?q=coffee&players=4&duration_min=30&duration_max=75&complexity_min=2&complexity_max=4&category_ids=5,7&mechanic_ids=8,9&limit=24&offset=6'
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      data: rows,
+      meta: {
+        count: 1,
+        limit: 24,
+        offset: 6
+      }
+    });
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('from active_item i');
+    expect(sql).toContain('i.has_approved_listing = true');
+    expect(sql).not.toContain('i.is_expansion = false');
+    expect(sql).toContain("concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es) ilike $1 escape '\\'");
+    expect(sql).toContain('coalesce(i.min_players, i.max_players) <= $2');
+    expect(sql).toContain('coalesce(i.max_players, i.min_players) >= $2');
+    expect(sql).toContain('coalesce(i.min_minutes, i.max_minutes) <= $4');
+    expect(sql).toContain('coalesce(i.max_minutes, i.min_minutes) >= $3');
+    expect(sql).toContain('i.complexity >= $5');
+    expect(sql).toContain('i.complexity <= $6');
+    expect(sql).toContain('ic.category_id = any($7::bigint[])');
+    expect(sql).toContain('= cardinality($7::bigint[])');
+    expect(sql).toContain('im.mechanic_id = any($8::bigint[])');
+    expect(sql).toContain('= cardinality($8::bigint[])');
+    expect(sql).toContain('limit $9');
+    expect(sql).toContain('offset $10');
+    expect(queries[0]?.params).toEqual(['%coffee%', 4, 30, 75, 2, 4, [5, 7], [8, 9], 24, 6]);
+  });
+
+  it('rejects malformed taxonomy filter ids before querying', async () => {
+    const database: Database = {
+      query: async () => {
+        throw new Error('should not query');
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items?category_ids=5,nope');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: {
+        message: 'category_ids must contain positive integers'
+      }
+    });
   });
 
   it('lists active items by semantic query embedding', async () => {

@@ -25,18 +25,16 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
 
   router.get('/items', async (request, response, next) => {
     try {
-      const query = stringQueryField(request.query.q);
-      const limit = integerQueryField(request.query.limit, 100, 1, 200);
-      const offset = integerQueryField(request.query.offset, 0, 0, 100000);
-      const params = query ? [likePattern(query), limit, offset] : [limit, offset];
-      const result = await database.query(itemsSql(Boolean(query)), params);
+      const filters = itemSearchFiltersFromQuery(request.query);
+      const query = buildItemsQuery(filters);
+      const result = await database.query(query.sql, query.params);
 
       response.json({
         data: result.rows,
         meta: {
           count: result.rows.length,
-          limit,
-          offset
+          limit: filters.limit,
+          offset: filters.offset
         }
       });
     } catch (error) {
@@ -330,16 +328,83 @@ const frontPageSql = `
   order by fpc."order" asc, fpc.id asc
 `;
 
-function itemsSql(hasSearch: boolean): string {
-  const whereSql = hasSearch
-    ? `
-      where concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es) ilike $1 escape '\\'
-    `
-    : '';
-  const limitPlaceholder = hasSearch ? '$2' : '$1';
-  const offsetPlaceholder = hasSearch ? '$3' : '$2';
+type ItemSearchFilters = {
+  categoryIds: number[];
+  complexityMax?: number;
+  complexityMin?: number;
+  durationMax?: number;
+  durationMin?: number;
+  limit: number;
+  mechanicIds: number[];
+  offset: number;
+  players?: number;
+  query: string;
+};
 
-  return `
+function buildItemsQuery(filters: ItemSearchFilters): { params: unknown[]; sql: string } {
+  const params: unknown[] = [];
+  const whereSql: string[] = ['i.has_approved_listing = true'];
+
+  function addParam(value: unknown): string {
+    params.push(value);
+    return `$${params.length}`;
+  }
+
+  if (filters.query) {
+    const queryPlaceholder = addParam(likePattern(filters.query));
+    whereSql.push(
+      `concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es) ilike ${queryPlaceholder} escape '\\'`
+    );
+  }
+
+  if (filters.players !== undefined) {
+    const playersPlaceholder = addParam(filters.players);
+    whereSql.push(`coalesce(i.min_players, i.max_players) <= ${playersPlaceholder}`);
+    whereSql.push(`coalesce(i.max_players, i.min_players) >= ${playersPlaceholder}`);
+  }
+
+  if (filters.durationMin !== undefined) {
+    const durationMinPlaceholder = addParam(filters.durationMin);
+    whereSql.push(`coalesce(i.max_minutes, i.min_minutes) >= ${durationMinPlaceholder}`);
+  }
+
+  if (filters.durationMax !== undefined) {
+    const durationMaxPlaceholder = addParam(filters.durationMax);
+    whereSql.push(`coalesce(i.min_minutes, i.max_minutes) <= ${durationMaxPlaceholder}`);
+  }
+
+  if (filters.complexityMin !== undefined) {
+    whereSql.push(`i.complexity >= ${addParam(filters.complexityMin)}`);
+  }
+
+  if (filters.complexityMax !== undefined) {
+    whereSql.push(`i.complexity <= ${addParam(filters.complexityMax)}`);
+  }
+
+  if (filters.categoryIds.length > 0) {
+    const categoryIdsPlaceholder = addParam(filters.categoryIds);
+    whereSql.push(`(
+      select count(distinct ic.category_id)
+      from item_categories ic
+      where ic.item_id = i.id
+        and ic.category_id = any(${categoryIdsPlaceholder}::bigint[])
+    ) = cardinality(${categoryIdsPlaceholder}::bigint[])`);
+  }
+
+  if (filters.mechanicIds.length > 0) {
+    const mechanicIdsPlaceholder = addParam(filters.mechanicIds);
+    whereSql.push(`(
+      select count(distinct im.mechanic_id)
+      from item_mechanics im
+      where im.item_id = i.id
+        and im.mechanic_id = any(${mechanicIdsPlaceholder}::bigint[])
+    ) = cardinality(${mechanicIdsPlaceholder}::bigint[])`);
+  }
+
+  const limitPlaceholder = addParam(filters.limit);
+  const offsetPlaceholder = addParam(filters.offset);
+
+  const sql = `
     select
       ${itemSelect},
       coalesce(categories.categories, '[]'::jsonb) as categories,
@@ -350,11 +415,12 @@ function itemsSql(hasSearch: boolean): string {
     from active_item i
     ${taxonomyLateralSql}
     ${publicMetadataLateralSql}
-    ${whereSql}
+    where ${whereSql.join('\n      and ')}
     order by i.canonical_name asc, i.id asc
     limit ${limitPlaceholder}
     offset ${offsetPlaceholder}
   `;
+  return { params, sql };
 }
 
 const semanticItemsSql = `
@@ -529,6 +595,93 @@ function integerQueryField(value: unknown, fallback: number, min: number, max: n
   }
 
   return Math.min(max, Math.max(min, parsed));
+}
+
+function itemSearchFiltersFromQuery(query: Record<string, unknown>): ItemSearchFilters {
+  const filters: ItemSearchFilters = {
+    categoryIds: positiveIntegerListQueryField(query.category_ids, 'category_ids'),
+    complexityMax: optionalNumberQueryField(query.complexity_max, 'complexity_max', 0, 5),
+    complexityMin: optionalNumberQueryField(query.complexity_min, 'complexity_min', 0, 5),
+    durationMax: optionalIntegerQueryField(query.duration_max, 'duration_max', 0, 100000),
+    durationMin: optionalIntegerQueryField(query.duration_min, 'duration_min', 0, 100000),
+    limit: integerQueryField(query.limit, 100, 1, 200),
+    mechanicIds: positiveIntegerListQueryField(query.mechanic_ids, 'mechanic_ids'),
+    offset: integerQueryField(query.offset, 0, 0, 100000),
+    players: optionalIntegerQueryField(query.players, 'players', 1, 100),
+    query: stringQueryField(query.q)
+  };
+
+  if (
+    filters.durationMin !== undefined &&
+    filters.durationMax !== undefined &&
+    filters.durationMin > filters.durationMax
+  ) {
+    throw httpError(400, 'duration_min must be less than or equal to duration_max');
+  }
+
+  if (
+    filters.complexityMin !== undefined &&
+    filters.complexityMax !== undefined &&
+    filters.complexityMin > filters.complexityMax
+  ) {
+    throw httpError(400, 'complexity_min must be less than or equal to complexity_max');
+  }
+
+  return filters;
+}
+
+function optionalIntegerQueryField(value: unknown, fieldName: string, min: number, max: number): number | undefined {
+  const rawValue = firstQueryValue(value);
+  if (rawValue === undefined || rawValue === '') {
+    return undefined;
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw httpError(400, `${fieldName} must be an integer between ${min} and ${max}`);
+  }
+
+  return parsed;
+}
+
+function optionalNumberQueryField(value: unknown, fieldName: string, min: number, max: number): number | undefined {
+  const rawValue = firstQueryValue(value);
+  if (rawValue === undefined || rawValue === '') {
+    return undefined;
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw httpError(400, `${fieldName} must be a number between ${min} and ${max}`);
+  }
+
+  return parsed;
+}
+
+function positiveIntegerListQueryField(value: unknown, fieldName: string): number[] {
+  const rawValues = Array.isArray(value) ? value : [value];
+  const parsedValues = rawValues
+    .flatMap((rawValue) => String(rawValue ?? '').split(','))
+    .map((rawValue) => rawValue.trim())
+    .filter(Boolean)
+    .map((rawValue) => Number(rawValue));
+
+  if (!parsedValues.every((parsedValue) => Number.isInteger(parsedValue) && parsedValue > 0)) {
+    throw httpError(400, `${fieldName} must contain positive integers`);
+  }
+
+  return Array.from(new Set(parsedValues));
+}
+
+function firstQueryValue(value: unknown): string | undefined {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  if (rawValue === undefined || rawValue === null) {
+    return undefined;
+  }
+  if (typeof rawValue === 'string' || typeof rawValue === 'number') {
+    return String(rawValue).trim();
+  }
+  return undefined;
 }
 
 function integerPathParam(value: string | undefined): number {
