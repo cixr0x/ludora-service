@@ -89,6 +89,7 @@ describe('ludora service', () => {
     expect(sql).toContain("'rating', i.rating");
     expect(sql).toContain("'has_approved_listing', i.has_approved_listing");
     expect(sql).toContain("'is_expansion', i.is_expansion");
+    expect(sql).toContain('order by i.rating desc nulls last, fpci.item_order asc, i.canonical_name asc, i.id asc');
     expect(sql).toContain('order by fpc."order" asc, fpc.id asc');
     expect(sql).not.toContain('select *');
   });

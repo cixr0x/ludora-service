@@ -314,7 +314,7 @@ const frontPageSql = `
           'has_approved_listing', i.has_approved_listing,
           'is_expansion', i.is_expansion
         )
-        order by fpci.item_order asc, i.canonical_name asc, i.id asc
+        order by i.rating desc nulls last, fpci.item_order asc, i.canonical_name asc, i.id asc
       ) filter (where i.id is not null),
       '[]'::jsonb
     ) as products
