@@ -137,6 +137,91 @@ describe('ludora service', () => {
     expect(queries[0]?.params).toEqual(['%coffee%', 12, 3]);
   });
 
+  it('lists lightweight item summaries without detail-only fields', async () => {
+    const rows = [
+      {
+        canonical_name: 'Coffee Rush',
+        canonical_name_es: 'Cafeteria',
+        categories: [{ id: 5, name: 'Party Game', name_es: 'Juego de fiesta' }],
+        id: 77,
+        image_url: 'https://cdn.example/coffee.jpg',
+        image_url_es: 'https://cdn.example/cafe.jpg',
+        is_expansion: false,
+        item_type: 'base_game',
+        max_minutes: 30,
+        max_players: 4,
+        mechanics: [{ id: 8, name: 'Action Drafting', name_es: 'Seleccion de acciones' }],
+        min_minutes: 20,
+        min_players: 2,
+        rating: '7.37125'
+      }
+    ];
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows };
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items/summary?q=coffee&limit=12&offset=3');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      data: rows,
+      meta: {
+        count: 1,
+        limit: 12,
+        offset: 3
+      }
+    });
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('from active_item i');
+    expect(sql).toContain('i.canonical_name');
+    expect(sql).toContain('i.image_url');
+    expect(sql).toContain('i.min_players');
+    expect(sql).toContain('i.max_minutes');
+    expect(sql).toContain('coalesce(categories.categories');
+    expect(sql).toContain('coalesce(mechanics.mechanics');
+    expect(sql).toContain("concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es) ilike $1 escape '\\'");
+    expect(sql).toContain('order by i.canonical_name asc, i.id asc');
+    expect(sql).not.toContain('i.description');
+    expect(sql).not.toContain('i.description_es');
+    expect(sql).not.toContain('from item_contributors');
+    expect(sql).not.toContain('from item_publishers');
+    expect(sql).not.toContain('from store_items');
+    expect(queries[0]?.params).toEqual(['%coffee%', 12, 3]);
+  });
+
+  it('returns lightweight catalog filter options', async () => {
+    const row = {
+      categories: [{ id: 5, name: 'Party Game', name_es: 'Juego de fiesta' }],
+      mechanics: [{ id: 8, name: 'Action Drafting', name_es: 'Seleccion de acciones' }]
+    };
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows: [row] };
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items/filter-options');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: row });
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('jsonb_agg');
+    expect(sql).toContain('from item_categories ic');
+    expect(sql).toContain('from item_mechanics im');
+    expect(sql).toContain('join active_item i on i.id = ic.item_id');
+    expect(sql).toContain('join active_item i on i.id = im.item_id');
+    expect(sql).toContain('i.has_approved_listing = true');
+    expect(sql).not.toContain('i.description');
+    expect(sql).not.toContain('from store_items');
+    expect(queries[0]?.params).toBeUndefined();
+  });
+
   it('splits text search into independent partial title tokens', async () => {
     const queries: Array<{ params?: unknown[]; sql: string }> = [];
     const database: Database = {

@@ -42,6 +42,34 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
     }
   });
 
+  router.get('/items/summary', async (request, response, next) => {
+    try {
+      const filters = itemSearchFiltersFromQuery(request.query);
+      const query = buildItemSummaryQuery(filters);
+      const result = await database.query(query.sql, query.params);
+
+      response.json({
+        data: result.rows,
+        meta: {
+          count: result.rows.length,
+          limit: filters.limit,
+          offset: filters.offset
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/items/filter-options', async (_request, response, next) => {
+    try {
+      const result = await database.query(catalogFilterOptionsSql);
+      response.json({ data: result.rows[0] ?? { categories: [], mechanics: [] } });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/items/semantic-search', async (request, response, next) => {
     try {
       const query = stringQueryField(request.query.q);
@@ -137,6 +165,25 @@ const itemSelect = `
   i.updated_at
 `;
 
+const itemSummarySelect = `
+  i.id,
+  i.canonical_name,
+  i.canonical_name_es,
+  i.item_type,
+  i.parent_item_id,
+  i.year_published,
+  i.rating,
+  i.min_players,
+  i.max_players,
+  i.min_minutes,
+  i.max_minutes,
+  i.complexity,
+  i.image_url,
+  i.image_url_es,
+  i.has_approved_listing,
+  i.is_expansion
+`;
+
 const taxonomyLateralSql = `
   left join lateral (
     select coalesce(
@@ -189,6 +236,43 @@ const taxonomyLateralSql = `
     join boardgame_families bf on bf.id = ifa.family_id
     where ifa.item_id = i.id
   ) families on true
+`;
+
+const summaryTaxonomyLateralSql = `
+  left join lateral (
+    select coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'id', bc.id,
+          'bgg_id', bc.bgg_id,
+          'name', bc.name,
+          'name_es', bc.name_es
+        )
+        order by bc.name asc, bc.id asc
+      ),
+      '[]'::jsonb
+    ) as categories
+    from item_categories ic
+    join boardgame_categories bc on bc.id = ic.category_id
+    where ic.item_id = i.id
+  ) categories on true
+  left join lateral (
+    select coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'id', bm.id,
+          'bgg_id', bm.bgg_id,
+          'name', bm.name,
+          'name_es', bm.name_es
+        )
+        order by bm.name asc, bm.id asc
+      ),
+      '[]'::jsonb
+    ) as mechanics
+    from item_mechanics im
+    join boardgame_mechanics bm on bm.id = im.mechanic_id
+    where im.item_id = i.id
+  ) mechanics on true
 `;
 
 const publicMetadataLateralSql = `
@@ -341,7 +425,13 @@ type ItemSearchFilters = {
   query: string;
 };
 
-function buildItemsQuery(filters: ItemSearchFilters): { params: unknown[]; sql: string } {
+type ItemSearchQueryParts = {
+  addParam(value: unknown): string;
+  params: unknown[];
+  whereSql: string[];
+};
+
+function buildItemSearchQueryParts(filters: ItemSearchFilters): ItemSearchQueryParts {
   const params: unknown[] = [];
   const whereSql: string[] = ['i.has_approved_listing = true'];
   const searchableTitleSql =
@@ -403,6 +493,11 @@ function buildItemsQuery(filters: ItemSearchFilters): { params: unknown[]; sql: 
     ) = cardinality(${mechanicIdsPlaceholder}::bigint[])`);
   }
 
+  return { addParam, params, whereSql };
+}
+
+function buildItemsQuery(filters: ItemSearchFilters): { params: unknown[]; sql: string } {
+  const { addParam, params, whereSql } = buildItemSearchQueryParts(filters);
   const limitPlaceholder = addParam(filters.limit);
   const offsetPlaceholder = addParam(filters.offset);
 
@@ -424,6 +519,72 @@ function buildItemsQuery(filters: ItemSearchFilters): { params: unknown[]; sql: 
   `;
   return { params, sql };
 }
+
+function buildItemSummaryQuery(filters: ItemSearchFilters): { params: unknown[]; sql: string } {
+  const { addParam, params, whereSql } = buildItemSearchQueryParts(filters);
+  const limitPlaceholder = addParam(filters.limit);
+  const offsetPlaceholder = addParam(filters.offset);
+
+  const sql = `
+    select
+      ${itemSummarySelect},
+      coalesce(categories.categories, '[]'::jsonb) as categories,
+      coalesce(mechanics.mechanics, '[]'::jsonb) as mechanics
+    from active_item i
+    ${summaryTaxonomyLateralSql}
+    where ${whereSql.join('\n      and ')}
+    order by i.canonical_name asc, i.id asc
+    limit ${limitPlaceholder}
+    offset ${offsetPlaceholder}
+  `;
+  return { params, sql };
+}
+
+const catalogFilterOptionsSql = `
+  select
+    coalesce(
+      (
+        select jsonb_agg(
+          jsonb_build_object(
+            'id', category_options.id,
+            'bgg_id', category_options.bgg_id,
+            'name', category_options.name,
+            'name_es', category_options.name_es
+          )
+          order by category_options.name asc, category_options.id asc
+        )
+        from (
+          select distinct bc.id, bc.bgg_id, bc.name, bc.name_es
+          from item_categories ic
+          join active_item i on i.id = ic.item_id
+          join boardgame_categories bc on bc.id = ic.category_id
+          where i.has_approved_listing = true
+        ) category_options
+      ),
+      '[]'::jsonb
+    ) as categories,
+    coalesce(
+      (
+        select jsonb_agg(
+          jsonb_build_object(
+            'id', mechanic_options.id,
+            'bgg_id', mechanic_options.bgg_id,
+            'name', mechanic_options.name,
+            'name_es', mechanic_options.name_es
+          )
+          order by mechanic_options.name asc, mechanic_options.id asc
+        )
+        from (
+          select distinct bm.id, bm.bgg_id, bm.name, bm.name_es
+          from item_mechanics im
+          join active_item i on i.id = im.item_id
+          join boardgame_mechanics bm on bm.id = im.mechanic_id
+          where i.has_approved_listing = true
+        ) mechanic_options
+      ),
+      '[]'::jsonb
+    ) as mechanics
+`;
 
 const semanticItemsSql = `
   select
