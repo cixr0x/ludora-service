@@ -66,7 +66,8 @@ describe('ludora service', () => {
             year_published: 2023
           }
         ],
-        title: 'Noche de juegos'
+        title: 'Noche de juegos',
+        title_display: 'Para empezar la noche'
       }
     ];
     const queries: string[] = [];
@@ -83,6 +84,7 @@ describe('ludora service', () => {
     expect(response.body).toEqual({ data: rows });
     const sql = normalizeSql(queries[0] ?? '');
     expect(sql).toContain('from front_page_categories fpc');
+    expect(sql).toContain('fpc.title_display');
     expect(sql).toContain('left join front_page_category_items fpci');
     expect(sql).toContain('left join active_item i');
     expect(sql).toContain('jsonb_agg');
