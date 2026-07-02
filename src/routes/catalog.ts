@@ -324,13 +324,32 @@ const tutorialLateralSql = `
           'source', tl.source,
           'status', tl.status
         )
-        order by tl.created_at desc, tl.id desc
+        order by tl.tutorial_scope asc, tl.created_at desc, tl.id desc
       ),
       '[]'::jsonb
     ) as tutorials
-    from tutorial_links tl
-    where tl.item_id = i.id
-      and tl.status = 'published'
+    from (
+      select tl.*, 0 as tutorial_scope
+      from tutorial_links tl
+      where tl.item_id = i.id
+        and tl.status = 'published'
+
+      union all
+
+      select tl.*, 1 as tutorial_scope
+      from tutorial_links tl
+      where i.is_expansion = true
+        and i.parent_item_id is not null
+        and tl.item_id = i.parent_item_id
+        and tl.status = 'published'
+        and not exists (
+          select 1
+          from tutorial_links direct_tutorial
+          where direct_tutorial.item_id = i.id
+            and direct_tutorial.status = 'published'
+            and direct_tutorial.source = tl.source
+        )
+    ) tl
   ) tutorials on true
 `;
 

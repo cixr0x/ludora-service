@@ -433,6 +433,36 @@ describe('ludora service', () => {
     expect(queries[0]?.params).toEqual([77]);
   });
 
+  it('falls back to published parent tutorials for expansions without direct tutorials', async () => {
+    const row = {
+      canonical_name: 'Coffee Rush Expansion',
+      id: 88,
+      is_expansion: true,
+      parent_item_id: 77,
+      tutorials: [{ id: 9, source: 'tiktok', title: 'Como jugar', url: 'https://www.tiktok.com/@creator/video/123' }]
+    };
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows: [row] };
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items/88');
+
+    expect(response.status).toBe(200);
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('tl.item_id = i.id');
+    expect(sql).toContain('i.is_expansion = true');
+    expect(sql).toContain('tl.item_id = i.parent_item_id');
+    expect(sql).toContain('not exists');
+    expect(sql).toContain('direct_tutorial.item_id = i.id');
+    expect(sql).toContain("direct_tutorial.status = 'published'");
+    expect(sql).toContain('direct_tutorial.source = tl.source');
+    expect(queries[0]?.params).toEqual([88]);
+  });
+
   it('returns 404 for missing active item detail', async () => {
     const response = await request(createApp({ database: idleDatabase() })).get('/api/items/77');
 
