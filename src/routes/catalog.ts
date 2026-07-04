@@ -677,6 +677,7 @@ const semanticItemsSql = `
   ${taxonomyLateralSql}
   ${publicMetadataLateralSql}
   where ise.model = $2
+    and i.has_approved_listing = true
   order by ise.embedding <=> $1::vector asc, i.canonical_name asc, i.id asc
   limit $3
 `;
