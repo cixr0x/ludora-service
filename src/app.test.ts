@@ -60,10 +60,7 @@ describe('ludora service', () => {
             canonical_name_es: 'Cafeteria',
             id: 77,
             image_url: 'https://cdn.example/coffee.jpg',
-            image_url_es: 'https://cdn.example/cafe.jpg',
-            item_type: 'base_game',
-            rating: '7.37125',
-            year_published: 2023
+            image_url_es: 'https://cdn.example/cafe.jpg'
           }
         ],
         title: 'Noche de juegos',
@@ -88,9 +85,21 @@ describe('ludora service', () => {
     expect(sql).toContain('left join front_page_category_items fpci');
     expect(sql).toContain('left join active_item i');
     expect(sql).toContain('jsonb_agg');
-    expect(sql).toContain("'rating', i.rating");
-    expect(sql).toContain("'has_approved_listing', i.has_approved_listing");
-    expect(sql).toContain("'is_expansion', i.is_expansion");
+    expect(sql).toContain("'id', i.id");
+    expect(sql).toContain("'canonical_name', i.canonical_name");
+    expect(sql).toContain("'canonical_name_es', i.canonical_name_es");
+    expect(sql).toContain("'image_url', i.image_url");
+    expect(sql).toContain("'image_url_es', i.image_url_es");
+    expect(sql).not.toContain("'item_type', i.item_type");
+    expect(sql).not.toContain("'year_published', i.year_published");
+    expect(sql).not.toContain("'rating', i.rating");
+    expect(sql).not.toContain("'min_players', i.min_players");
+    expect(sql).not.toContain("'max_players', i.max_players");
+    expect(sql).not.toContain("'min_minutes', i.min_minutes");
+    expect(sql).not.toContain("'max_minutes', i.max_minutes");
+    expect(sql).not.toContain("'complexity', i.complexity");
+    expect(sql).not.toContain("'has_approved_listing', i.has_approved_listing");
+    expect(sql).not.toContain("'is_expansion', i.is_expansion");
     expect(sql).toContain('order by i.rating desc nulls last, fpci.item_order asc, i.canonical_name asc, i.id asc');
     expect(sql).toContain('order by fpc."order" asc, fpc.id asc');
     expect(sql).not.toContain('select *');

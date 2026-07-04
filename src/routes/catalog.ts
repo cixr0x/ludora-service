@@ -446,17 +446,7 @@ const frontPageSql = `
           'canonical_name', i.canonical_name,
           'canonical_name_es', i.canonical_name_es,
           'image_url', i.image_url,
-          'image_url_es', i.image_url_es,
-          'item_type', i.item_type,
-          'year_published', i.year_published,
-          'rating', i.rating,
-          'min_players', i.min_players,
-          'max_players', i.max_players,
-          'min_minutes', i.min_minutes,
-          'max_minutes', i.max_minutes,
-          'complexity', i.complexity,
-          'has_approved_listing', i.has_approved_listing,
-          'is_expansion', i.is_expansion
+          'image_url_es', i.image_url_es
         )
         order by i.rating desc nulls last, fpci.item_order asc, i.canonical_name asc, i.id asc
       ) filter (where i.id is not null),
