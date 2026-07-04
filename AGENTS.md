@@ -9,4 +9,8 @@ Use the fixed Codex startup command for this project:
 
 Do not choose another port automatically. If port `4000` is busy, report the owning process and ask before stopping it or using a different port.
 
+## Completion
+
+When a task changes files, commit and push the task changes in each affected Git repository before reporting completion. If unrelated pre-existing changes are present, leave them untouched and report them separately.
+
 Do not run DDL or DML SQL commands without user confirmation.
