@@ -478,6 +478,59 @@ describe('ludora service', () => {
     });
   });
 
+  it('lists minimal related items from shared taxonomy', async () => {
+    const rows = [
+      {
+        canonical_name: 'Coffee Rush',
+        canonical_name_es: 'Cafeteria',
+        id: 77,
+        image_url: 'https://cdn.example/coffee.jpg',
+        image_url_es: 'https://cdn.example/cafe.jpg'
+      }
+    ];
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows };
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items/99/related?limit=12');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      data: rows,
+      meta: {
+        count: 1,
+        limit: 12
+      }
+    });
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    const selectSql = sql.match(/select (.*) from related_scores rs/)?.[1] ?? '';
+    expect(sql).toContain('with target_taxonomy as');
+    expect(sql).toContain('from item_categories ic');
+    expect(sql).toContain('from item_mechanics im');
+    expect(sql).toContain('from item_families ifa');
+    expect(sql).toContain('join target_taxonomy tt');
+    expect(sql).toContain('ct.item_id <> $1');
+    expect(sql).toContain('join active_item i on i.id = rs.item_id');
+    expect(sql).toContain('i.has_approved_listing = true');
+    expect(sql).toContain('order by rs.shared_taxonomy_count desc, i.rating desc nulls last, i.canonical_name asc, i.id asc');
+    expect(sql).toContain('limit $2');
+    expect(selectSql).toContain('i.id');
+    expect(selectSql).toContain('i.canonical_name');
+    expect(selectSql).toContain('i.canonical_name_es');
+    expect(selectSql).toContain('i.image_url');
+    expect(selectSql).toContain('i.image_url_es');
+    expect(selectSql).not.toContain('i.rating');
+    expect(selectSql).not.toContain('i.min_players');
+    expect(selectSql).not.toContain('i.max_players');
+    expect(selectSql).not.toContain('i.complexity');
+    expect(sql).not.toContain('left join lateral');
+    expect(queries[0]?.params).toEqual([99, 12]);
+  });
+
   it('returns one active item detail with public metadata', async () => {
     const row = {
       canonical_name: 'Coffee Rush',

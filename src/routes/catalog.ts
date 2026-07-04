@@ -136,6 +136,24 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
     }
   });
 
+  router.get('/items/:id/related', async (request, response, next) => {
+    try {
+      const itemId = integerPathParam(request.params.id);
+      const limit = integerQueryField(request.query.limit, 18, 1, 50);
+      const result = await database.query(relatedItemsSql, [itemId, limit]);
+
+      response.json({
+        data: result.rows,
+        meta: {
+          count: result.rows.length,
+          limit
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/items/:id/taxonomy', async (request, response, next) => {
     try {
       const itemId = integerPathParam(request.params.id);
@@ -222,6 +240,14 @@ const itemSearchResultSelect = `
   i.item_type,
   i.parent_item_id,
   i.is_expansion
+`;
+
+const relatedItemSelect = `
+  i.id,
+  i.canonical_name,
+  i.canonical_name_es,
+  i.image_url,
+  i.image_url_es
 `;
 
 const taxonomyLateralSql = `
@@ -723,6 +749,54 @@ const storeItemClickSql = `
   values ($1, date_trunc('hour', now()), 1)
   on conflict (store_item_id, clicked_hour)
   do update set click_count = store_item_click_stats.click_count + 1
+`;
+
+const relatedItemsSql = `
+  with target_taxonomy as (
+    select 'category' as taxonomy_type, ic.category_id as taxonomy_id
+    from item_categories ic
+    where ic.item_id = $1
+
+    union all
+
+    select 'mechanic' as taxonomy_type, im.mechanic_id as taxonomy_id
+    from item_mechanics im
+    where im.item_id = $1
+
+    union all
+
+    select 'family' as taxonomy_type, ifa.family_id as taxonomy_id
+    from item_families ifa
+    where ifa.item_id = $1
+  ),
+  candidate_taxonomy as (
+    select ic.item_id, 'category' as taxonomy_type, ic.category_id as taxonomy_id
+    from item_categories ic
+
+    union all
+
+    select im.item_id, 'mechanic' as taxonomy_type, im.mechanic_id as taxonomy_id
+    from item_mechanics im
+
+    union all
+
+    select ifa.item_id, 'family' as taxonomy_type, ifa.family_id as taxonomy_id
+    from item_families ifa
+  ),
+  related_scores as (
+    select ct.item_id, count(*) as shared_taxonomy_count
+    from candidate_taxonomy ct
+    join target_taxonomy tt on tt.taxonomy_type = ct.taxonomy_type and tt.taxonomy_id = ct.taxonomy_id
+    where ct.item_id <> $1
+    group by ct.item_id
+  )
+  select
+    ${relatedItemSelect}
+  from related_scores rs
+  join active_item i on i.id = rs.item_id
+  where i.has_approved_listing = true
+  order by rs.shared_taxonomy_count desc, i.rating desc nulls last, i.canonical_name asc, i.id asc
+  limit $2
 `;
 
 const itemTaxonomySql = `
