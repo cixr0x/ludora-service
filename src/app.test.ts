@@ -195,6 +195,64 @@ describe('ludora service', () => {
     expect(queries[0]?.params).toEqual(['%coffee%', 12, 3]);
   });
 
+  it('lists minimal search result items without summary-only fields', async () => {
+    const rows = [
+      {
+        canonical_name: 'Coffee Rush',
+        canonical_name_es: 'Cafeteria',
+        id: 77,
+        image_url: 'https://cdn.example/coffee.jpg',
+        image_url_es: 'https://cdn.example/cafe.jpg',
+        is_expansion: false,
+        item_type: 'base_game',
+        parent_item_id: null
+      }
+    ];
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows };
+      }
+    };
+
+    const response = await request(createApp({ database })).get(
+      '/api/items/search-results?q=coffee&players=4&duration_min=30&duration_max=75&complexity_min=2&complexity_max=4&category_ids=5,7&mechanic_ids=8,9&limit=24&offset=6'
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      data: rows,
+      meta: {
+        count: 1,
+        limit: 24,
+        offset: 6
+      }
+    });
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('from active_item i');
+    expect(sql).toContain('i.canonical_name');
+    expect(sql).toContain('i.canonical_name_es');
+    expect(sql).toContain('i.image_url');
+    expect(sql).toContain('i.image_url_es');
+    expect(sql).toContain('i.item_type');
+    expect(sql).toContain('i.parent_item_id');
+    expect(sql).toContain('i.is_expansion');
+    expect(sql).toContain('i.has_approved_listing = true');
+    expect(sql).toContain("concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es) ilike $1 escape '\\'");
+    expect(sql).toContain('order by i.canonical_name asc, i.id asc');
+    expect(sql).not.toContain('coalesce(categories.categories');
+    expect(sql).not.toContain('coalesce(mechanics.mechanics');
+    expect(sql).not.toContain('left join lateral');
+    expect(sql).not.toContain('i.min_players,');
+    expect(sql).not.toContain('i.max_players,');
+    expect(sql).not.toContain('i.min_minutes,');
+    expect(sql).not.toContain('i.max_minutes,');
+    expect(sql).not.toContain('i.complexity,');
+    expect(sql).not.toContain('i.rating,');
+    expect(queries[0]?.params).toEqual(['%coffee%', 4, 30, 75, 2, 4, [5, 7], [8, 9], 24, 6]);
+  });
+
   it('returns lightweight catalog filter options', async () => {
     const row = {
       categories: [{ id: 5, name: 'Party Game', name_es: 'Juego de fiesta' }],

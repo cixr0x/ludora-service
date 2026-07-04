@@ -61,6 +61,25 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
     }
   });
 
+  router.get('/items/search-results', async (request, response, next) => {
+    try {
+      const filters = itemSearchFiltersFromQuery(request.query);
+      const query = buildItemSearchResultsQuery(filters);
+      const result = await database.query(query.sql, query.params);
+
+      response.json({
+        data: result.rows,
+        meta: {
+          count: result.rows.length,
+          limit: filters.limit,
+          offset: filters.offset
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/items/filter-options', async (_request, response, next) => {
     try {
       const result = await database.query(catalogFilterOptionsSql);
@@ -191,6 +210,17 @@ const itemSummarySelect = `
   i.image_url,
   i.image_url_es,
   i.has_approved_listing,
+  i.is_expansion
+`;
+
+const itemSearchResultSelect = `
+  i.id,
+  i.canonical_name,
+  i.canonical_name_es,
+  i.image_url,
+  i.image_url_es,
+  i.item_type,
+  i.parent_item_id,
   i.is_expansion
 `;
 
@@ -461,9 +491,17 @@ type ItemSearchQueryParts = {
   whereSql: string[];
 };
 
-function buildItemSearchQueryParts(filters: ItemSearchFilters): ItemSearchQueryParts {
+type ItemSearchQueryPartsOptions = {
+  columnSql?: (column: string) => string;
+};
+
+function buildItemSearchQueryParts(
+  filters: ItemSearchFilters,
+  options: ItemSearchQueryPartsOptions = {}
+): ItemSearchQueryParts {
   const params: unknown[] = [];
   const whereSql: string[] = ['i.has_approved_listing = true'];
+  const columnSql = options.columnSql ?? ((column: string): string => column);
   const searchableTitleSql =
     "concat_ws(' ', i.canonical_name, i.canonical_name_es, i.normalized_name, i.normalized_name_es)";
 
@@ -481,26 +519,26 @@ function buildItemSearchQueryParts(filters: ItemSearchFilters): ItemSearchQueryP
 
   if (filters.players !== undefined) {
     const playersPlaceholder = addParam(filters.players);
-    whereSql.push(`coalesce(i.min_players, i.max_players) <= ${playersPlaceholder}`);
-    whereSql.push(`coalesce(i.max_players, i.min_players) >= ${playersPlaceholder}`);
+    whereSql.push(`coalesce(${columnSql('i.min_players')}, ${columnSql('i.max_players')}) <= ${playersPlaceholder}`);
+    whereSql.push(`coalesce(${columnSql('i.max_players')}, ${columnSql('i.min_players')}) >= ${playersPlaceholder}`);
   }
 
   if (filters.durationMin !== undefined) {
     const durationMinPlaceholder = addParam(filters.durationMin);
-    whereSql.push(`coalesce(i.max_minutes, i.min_minutes) >= ${durationMinPlaceholder}`);
+    whereSql.push(`coalesce(${columnSql('i.max_minutes')}, ${columnSql('i.min_minutes')}) >= ${durationMinPlaceholder}`);
   }
 
   if (filters.durationMax !== undefined) {
     const durationMaxPlaceholder = addParam(filters.durationMax);
-    whereSql.push(`coalesce(i.min_minutes, i.max_minutes) <= ${durationMaxPlaceholder}`);
+    whereSql.push(`coalesce(${columnSql('i.min_minutes')}, ${columnSql('i.max_minutes')}) <= ${durationMaxPlaceholder}`);
   }
 
   if (filters.complexityMin !== undefined) {
-    whereSql.push(`i.complexity >= ${addParam(filters.complexityMin)}`);
+    whereSql.push(`${columnSql('i.complexity')} >= ${addParam(filters.complexityMin)}`);
   }
 
   if (filters.complexityMax !== undefined) {
-    whereSql.push(`i.complexity <= ${addParam(filters.complexityMax)}`);
+    whereSql.push(`${columnSql('i.complexity')} <= ${addParam(filters.complexityMax)}`);
   }
 
   if (filters.categoryIds.length > 0) {
@@ -568,6 +606,27 @@ function buildItemSummaryQuery(filters: ItemSearchFilters): { params: unknown[];
     offset ${offsetPlaceholder}
   `;
   return { params, sql };
+}
+
+function buildItemSearchResultsQuery(filters: ItemSearchFilters): { params: unknown[]; sql: string } {
+  const { addParam, params, whereSql } = buildItemSearchQueryParts(filters, { columnSql: parenthesizedColumnSql });
+  const limitPlaceholder = addParam(filters.limit);
+  const offsetPlaceholder = addParam(filters.offset);
+
+  const sql = `
+    select
+      ${itemSearchResultSelect}
+    from active_item i
+    where ${whereSql.join('\n      and ')}
+    order by i.canonical_name asc, i.id asc
+    limit ${limitPlaceholder}
+    offset ${offsetPlaceholder}
+  `;
+  return { params, sql };
+}
+
+function parenthesizedColumnSql(column: string): string {
+  return `(${column})`;
 }
 
 const catalogFilterOptionsSql = `
