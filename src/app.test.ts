@@ -523,6 +523,46 @@ describe('ludora service', () => {
     expect(queries[0]?.params).toEqual([77]);
   });
 
+  it('records a store item click in the current hourly bucket', async () => {
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows: [] };
+      }
+    };
+
+    const response = await request(createApp({ database })).post('/api/store-items/300/clicks');
+
+    expect(response.status).toBe(204);
+    expect(response.text).toBe('');
+    expect(queries).toHaveLength(1);
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('insert into store_item_click_stats');
+    expect(sql).toContain('store_item_id, clicked_hour, click_count');
+    expect(sql).toContain("values ($1, date_trunc('hour', now()), 1)");
+    expect(sql).toContain('on conflict (store_item_id, clicked_hour)');
+    expect(sql).toContain('do update set click_count = store_item_click_stats.click_count + 1');
+    expect(queries[0]?.params).toEqual([300]);
+  });
+
+  it('rejects invalid store item click ids before querying the database', async () => {
+    const database: Database = {
+      query: async () => {
+        throw new Error('should not query');
+      }
+    };
+
+    const response = await request(createApp({ database })).post('/api/store-items/nope/clicks');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: {
+        message: 'id must be a positive integer'
+      }
+    });
+  });
+
   it('returns taxonomy for one item', async () => {
     const row = {
       categories: [{ id: 5, name: 'Party Game', name_es: 'Juego de fiesta' }],

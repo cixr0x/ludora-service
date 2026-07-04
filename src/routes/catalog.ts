@@ -107,6 +107,16 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
     }
   });
 
+  router.post('/store-items/:id/clicks', async (request, response, next) => {
+    try {
+      const storeItemId = integerPathParam(request.params.id);
+      await database.query(storeItemClickSql, [storeItemId]);
+      response.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/items/:id/taxonomy', async (request, response, next) => {
     try {
       const itemId = integerPathParam(request.params.id);
@@ -668,6 +678,13 @@ const storeOffersSql = `
     and si.is_boardgame_confirmed = true
     and si.listing_status = 'LISTED'
   order by si.price asc nulls last, s.name asc
+`;
+
+const storeItemClickSql = `
+  insert into store_item_click_stats (store_item_id, clicked_hour, click_count)
+  values ($1, date_trunc('hour', now()), 1)
+  on conflict (store_item_id, clicked_hour)
+  do update set click_count = store_item_click_stats.click_count + 1
 `;
 
 const itemTaxonomySql = `
