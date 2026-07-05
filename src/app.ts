@@ -4,6 +4,7 @@ import express, { Router, type ErrorRequestHandler, type Express } from 'express
 import type { Database } from './db.js';
 import type { EmbeddingClient } from './embeddings.js';
 import { createCatalogRouter } from './routes/catalog.js';
+import { createContactRouter } from './routes/contact.js';
 import { createHealthRouter } from './routes/health.js';
 
 type HttpError = Error & {
@@ -26,6 +27,7 @@ export function createApp({ database, corsOrigin, embeddingClient, embeddingMode
   app.use(express.json());
 
   api.use(createHealthRouter());
+  api.use(createContactRouter(database));
   api.use(createCatalogRouter(database, { embeddingClient, embeddingModel }));
   app.use('/api', api);
   app.use(jsonErrorHandler);

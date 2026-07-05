@@ -45,6 +45,53 @@ describe('ludora service', () => {
     });
   });
 
+  it('stores a contact form submission with trimmed public fields', async () => {
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows: [{ id: 42 }] };
+      }
+    };
+
+    const response = await request(createApp({ database })).post('/api/contact').send({
+      name: '  Maria Garcia  ',
+      email: '  maria@example.com  ',
+      message: '  Quiero sugerir una tienda.  '
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toEqual({ data: { id: 42 } });
+    expect(queries).toHaveLength(1);
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('insert into contact_form_submissions');
+    expect(sql).toContain('(name, email, message)');
+    expect(sql).toContain('values ($1, $2, $3)');
+    expect(sql).toContain('returning id');
+    expect(queries[0]?.params).toEqual(['Maria Garcia', 'maria@example.com', 'Quiero sugerir una tienda.']);
+  });
+
+  it('rejects invalid contact form submissions before querying', async () => {
+    const database: Database = {
+      query: async () => {
+        throw new Error('should not query');
+      }
+    };
+
+    const response = await request(createApp({ database })).post('/api/contact').send({
+      name: '',
+      email: 'not-an-email',
+      message: ''
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: {
+        message: 'name, a valid email, and message are required'
+      }
+    });
+  });
+
   it('returns front page rows from configured categories and active items', async () => {
     const rows = [
       {
