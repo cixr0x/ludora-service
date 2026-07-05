@@ -9,6 +9,7 @@ type CatalogRouterOptions = {
 };
 
 const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
+const MAX_SEMANTIC_DISTANCE = 0.62;
 
 export function createCatalogRouter(database: Database, options: CatalogRouterOptions = {}): Router {
   const router = Router();
@@ -102,7 +103,12 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
 
       const limit = integerQueryField(request.query.limit, 20, 1, 100);
       const embedding = await options.embeddingClient.embed(query);
-      const result = await database.query(semanticItemsSql, [vectorLiteral(embedding), embeddingModel, limit]);
+      const result = await database.query(semanticItemsSql, [
+        vectorLiteral(embedding),
+        embeddingModel,
+        MAX_SEMANTIC_DISTANCE,
+        limit
+      ]);
 
       response.json({
         data: result.rows,
@@ -694,8 +700,9 @@ const semanticItemsSql = `
   ${publicMetadataLateralSql}
   where ise.model = $2
     and i.has_approved_listing = true
+    and (ise.embedding <=> $1::vector) <= $3
   order by ise.embedding <=> $1::vector asc, i.canonical_name asc, i.id asc
-  limit $3
+  limit $4
 `;
 
 const itemDetailSql = `

@@ -439,9 +439,10 @@ describe('ludora service', () => {
     expect(sql).toContain('ise.embedding <=> $1::vector');
     expect(sql).toContain('where ise.model = $2');
     expect(sql).toContain('i.has_approved_listing = true');
+    expect(sql).toContain('(ise.embedding <=> $1::vector) <= $3');
     expect(sql).toContain('from item_categories ic');
     expect(sql).toContain('order by ise.embedding <=> $1::vector asc, i.canonical_name asc, i.id asc');
-    expect(queries[0]?.params).toEqual(['[0.1,-0.2,0.3]', 'text-embedding-3-small', 7]);
+    expect(queries[0]?.params).toEqual(['[0.1,-0.2,0.3]', 'text-embedding-3-small', 0.62, 7]);
   });
 
   it('rejects semantic search without a query before embedding or querying', async () => {
