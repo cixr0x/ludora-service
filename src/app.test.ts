@@ -45,6 +45,74 @@ describe('ludora service', () => {
     });
   });
 
+  it('rate limits public API requests with the configured JSON response', async () => {
+    const app = createApp({
+      database: idleDatabase(),
+      publicApiRateLimit: { windowMs: 60000, max: 1 }
+    });
+
+    const firstResponse = await request(app).get('/api/front-page');
+    const secondResponse = await request(app).get('/api/front-page');
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(429);
+    expect(secondResponse.body).toEqual({
+      error: {
+        message: 'Too many requests'
+      }
+    });
+  });
+
+  it('does not rate limit public API health checks', async () => {
+    const app = createApp({
+      database: idleDatabase(),
+      publicApiRateLimit: { windowMs: 60000, max: 1 }
+    });
+
+    const firstResponse = await request(app).get('/api/health');
+    const secondResponse = await request(app).get('/api/health');
+    const thirdResponse = await request(app).get('/api/health');
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(thirdResponse.status).toBe(200);
+  });
+
+  it('applies stricter rate limits to public write endpoints', async () => {
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows: [{ id: 42 }] };
+      }
+    };
+    const app = createApp({
+      database,
+      publicApiRateLimit: { windowMs: 60000, max: 20 },
+      publicApiStrictRateLimit: { windowMs: 60000, max: 1 }
+    });
+
+    const firstResponse = await request(app).post('/api/contact').send({
+      name: 'Maria Garcia',
+      email: 'maria@example.com',
+      message: 'Quiero sugerir una tienda.'
+    });
+    const secondResponse = await request(app).post('/api/contact').send({
+      name: 'Maria Garcia',
+      email: 'maria@example.com',
+      message: 'Quiero sugerir una tienda.'
+    });
+
+    expect(firstResponse.status).toBe(201);
+    expect(secondResponse.status).toBe(429);
+    expect(secondResponse.body).toEqual({
+      error: {
+        message: 'Too many requests'
+      }
+    });
+    expect(queries).toHaveLength(1);
+  });
+
   it('stores a contact form submission with trimmed public fields', async () => {
     const queries: Array<{ params?: unknown[]; sql: string }> = [];
     const database: Database = {

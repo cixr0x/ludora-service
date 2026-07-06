@@ -20,7 +20,10 @@ const app = createApp({
   database,
   corsOrigin: config.corsOrigin,
   embeddingClient,
-  embeddingModel: config.embeddingModel
+  embeddingModel: config.embeddingModel,
+  publicApiRateLimit: config.publicApiRateLimit,
+  publicApiStrictRateLimit: config.publicApiStrictRateLimit,
+  trustProxy: config.trustProxy
 });
 
 const server = app.listen(config.port, () => {

@@ -3,6 +3,11 @@ import express, { Router, type ErrorRequestHandler, type Express } from 'express
 
 import type { Database } from './db.js';
 import type { EmbeddingClient } from './embeddings.js';
+import {
+  createPublicApiRateLimiter,
+  createStrictPublicApiRateLimiter,
+  type RateLimitOptions
+} from './rateLimit.js';
 import { createCatalogRouter } from './routes/catalog.js';
 import { createContactRouter } from './routes/contact.js';
 import { createHealthRouter } from './routes/health.js';
@@ -17,14 +22,39 @@ type CreateAppOptions = {
   corsOrigin?: string | string[];
   embeddingClient?: EmbeddingClient;
   embeddingModel?: string;
+  publicApiRateLimit?: RateLimitOptions;
+  publicApiStrictRateLimit?: RateLimitOptions;
+  trustProxy?: boolean;
 };
 
-export function createApp({ database, corsOrigin, embeddingClient, embeddingModel }: CreateAppOptions): Express {
+export function createApp({
+  database,
+  corsOrigin,
+  embeddingClient,
+  embeddingModel,
+  publicApiRateLimit,
+  publicApiStrictRateLimit,
+  trustProxy
+}: CreateAppOptions): Express {
   const app = express();
   const api = Router();
 
+  if (typeof trustProxy === 'boolean') {
+    app.set('trust proxy', trustProxy ? 1 : false);
+  }
+
   app.use(cors({ origin: corsOrigin }));
-  app.use(express.json());
+
+  if (publicApiRateLimit) {
+    api.use(createPublicApiRateLimiter(publicApiRateLimit));
+  }
+  if (publicApiStrictRateLimit) {
+    const strictLimiter = createStrictPublicApiRateLimiter(publicApiStrictRateLimit);
+    api.use('/contact', strictLimiter);
+    api.use('/store-items/:id/clicks', strictLimiter);
+    api.use('/items/semantic-search', strictLimiter);
+  }
+  api.use(express.json());
 
   api.use(createHealthRouter());
   api.use(createContactRouter(database));

@@ -60,4 +60,51 @@ describe('loadConfig', () => {
 
     expect(loadConfig().embeddingModel).toBe('text-embedding-3-small');
   });
+
+  it('defaults public API rate limits and proxy trust', () => {
+    vi.stubEnv('PUBLIC_API_RATE_LIMIT_WINDOW_MS', undefined);
+    vi.stubEnv('PUBLIC_API_RATE_LIMIT_MAX', undefined);
+    vi.stubEnv('PUBLIC_API_STRICT_RATE_LIMIT_WINDOW_MS', undefined);
+    vi.stubEnv('PUBLIC_API_STRICT_RATE_LIMIT_MAX', undefined);
+    vi.stubEnv('TRUST_PROXY', undefined);
+
+    expect(loadConfig().publicApiRateLimit).toEqual({
+      windowMs: 60000,
+      max: 120
+    });
+    expect(loadConfig().publicApiStrictRateLimit).toEqual({
+      windowMs: 60000,
+      max: 20
+    });
+    expect(loadConfig().trustProxy).toBe(false);
+  });
+
+  it('loads public API rate limits and proxy trust from env', () => {
+    vi.stubEnv('PUBLIC_API_RATE_LIMIT_WINDOW_MS', '30000');
+    vi.stubEnv('PUBLIC_API_RATE_LIMIT_MAX', '40');
+    vi.stubEnv('PUBLIC_API_STRICT_RATE_LIMIT_WINDOW_MS', '45000');
+    vi.stubEnv('PUBLIC_API_STRICT_RATE_LIMIT_MAX', '8');
+    vi.stubEnv('TRUST_PROXY', 'true');
+
+    expect(loadConfig().publicApiRateLimit).toEqual({ windowMs: 30000, max: 40 });
+    expect(loadConfig().publicApiStrictRateLimit).toEqual({ windowMs: 45000, max: 8 });
+    expect(loadConfig().trustProxy).toBe(true);
+  });
+
+  it.each([
+    ['PUBLIC_API_RATE_LIMIT_WINDOW_MS', '0'],
+    ['PUBLIC_API_RATE_LIMIT_MAX', '-1'],
+    ['PUBLIC_API_STRICT_RATE_LIMIT_WINDOW_MS', '60000.5'],
+    ['PUBLIC_API_STRICT_RATE_LIMIT_MAX', 'abc']
+  ])('rejects invalid public API rate limit value %s=%s', (name, value) => {
+    vi.stubEnv(name, value);
+
+    expect(() => loadConfig()).toThrow(`${name} must be a positive integer`);
+  });
+
+  it('rejects invalid TRUST_PROXY values', () => {
+    vi.stubEnv('TRUST_PROXY', 'sometimes');
+
+    expect(() => loadConfig()).toThrow('TRUST_PROXY must be true or false');
+  });
 });

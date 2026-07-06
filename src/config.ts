@@ -8,9 +8,22 @@ export type Config = {
   corsOrigin: string[];
   openAiApiKey?: string;
   embeddingModel: string;
+  publicApiRateLimit: {
+    max: number;
+    windowMs: number;
+  };
+  publicApiStrictRateLimit: {
+    max: number;
+    windowMs: number;
+  };
+  trustProxy: boolean;
 };
 
 const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
+const DEFAULT_PUBLIC_API_RATE_LIMIT_WINDOW_MS = 60_000;
+const DEFAULT_PUBLIC_API_RATE_LIMIT_MAX = 120;
+const DEFAULT_PUBLIC_API_STRICT_RATE_LIMIT_WINDOW_MS = 60_000;
+const DEFAULT_PUBLIC_API_STRICT_RATE_LIMIT_MAX = 20;
 
 const DEFAULT_CORS_ORIGINS = [
   'http://localhost:5173',
@@ -25,7 +38,22 @@ export function loadConfig(): Config {
     databaseUrl: process.env.LUDORA_DATABASE_URL,
     corsOrigin: readCorsOrigins(),
     openAiApiKey: readOptionalEnv('OPENAI_API_KEY'),
-    embeddingModel: readOptionalEnv('OPENAI_EMBEDDING_MODEL') ?? DEFAULT_EMBEDDING_MODEL
+    embeddingModel: readOptionalEnv('OPENAI_EMBEDDING_MODEL') ?? DEFAULT_EMBEDDING_MODEL,
+    publicApiRateLimit: {
+      windowMs: readPositiveIntegerEnv(
+        'PUBLIC_API_RATE_LIMIT_WINDOW_MS',
+        DEFAULT_PUBLIC_API_RATE_LIMIT_WINDOW_MS
+      ),
+      max: readPositiveIntegerEnv('PUBLIC_API_RATE_LIMIT_MAX', DEFAULT_PUBLIC_API_RATE_LIMIT_MAX)
+    },
+    publicApiStrictRateLimit: {
+      windowMs: readPositiveIntegerEnv(
+        'PUBLIC_API_STRICT_RATE_LIMIT_WINDOW_MS',
+        DEFAULT_PUBLIC_API_STRICT_RATE_LIMIT_WINDOW_MS
+      ),
+      max: readPositiveIntegerEnv('PUBLIC_API_STRICT_RATE_LIMIT_MAX', DEFAULT_PUBLIC_API_STRICT_RATE_LIMIT_MAX)
+    },
+    trustProxy: readBooleanEnv('TRUST_PROXY', false)
   };
 }
 
@@ -56,6 +84,31 @@ function readCorsOrigins(): string[] {
 
 function uniqueOrigins(origins: string[]): string[] {
   return Array.from(new Set(origins));
+}
+
+function readPositiveIntegerEnv(name: string, defaultValue: number): number {
+  const rawValue = process.env[name]?.trim();
+  const value = rawValue ? Number(rawValue) : defaultValue;
+
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return value;
+}
+
+function readBooleanEnv(name: string, defaultValue: boolean): boolean {
+  const rawValue = process.env[name]?.trim().toLowerCase();
+  if (!rawValue) {
+    return defaultValue;
+  }
+  if (rawValue === 'true') {
+    return true;
+  }
+  if (rawValue === 'false') {
+    return false;
+  }
+  throw new Error(`${name} must be true or false`);
 }
 
 function readOptionalEnv(name: string): string | undefined {
