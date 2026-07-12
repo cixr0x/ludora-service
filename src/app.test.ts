@@ -680,6 +680,8 @@ describe('ludora service', () => {
     expect(sql).toContain('from tutorial_links tl');
     expect(sql).toContain("'store_active', si.store_active");
     expect(sql).toContain('from store_items si');
+    expect(sql).toContain('when si.store_active = false then 2');
+    expect(sql).toContain("when lower(coalesce(si.availability, '')) in");
     expect(sql).toContain('where i.id = $1');
     expect(queries[0]?.params).toEqual([77]);
   });
@@ -772,7 +774,9 @@ describe('ludora service', () => {
     expect(sql).toContain('si.store_active');
     expect(sql).toContain('si.listing_status =');
     expect(sql).toContain('si.item_id = $1');
-    expect(sql).toContain('order by si.price asc nulls last, s.name asc');
+    expect(sql).toContain('when si.store_active = false then 2');
+    expect(sql).toContain("when lower(coalesce(si.availability, '')) in");
+    expect(sql).toContain('si.price asc nulls last');
     expect(queries[0]?.params).toEqual([77]);
   });
 

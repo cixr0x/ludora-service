@@ -449,7 +449,18 @@ const itemOffersLateralSql = `
           'listing_status', si.listing_status,
           'last_seen_at', si.last_seen_at
         )
-        order by si.price asc nulls last, s.name asc, si.id asc
+        order by
+          case
+            when si.store_active = false then 2
+            when lower(coalesce(si.availability, '')) in (
+              'out_of_stock', 'outofstock', 'sold_out', 'soldout', 'sold-out',
+              'agotado', 'sin_stock', 'sin stock', 'unavailable', 'no_disponible', 'no disponible'
+            ) then 1
+            else 0
+          end,
+          si.price asc nulls last,
+          s.name asc,
+          si.id asc
       ),
       '[]'::jsonb
     ) as offers
@@ -750,7 +761,17 @@ const storeOffersSql = `
     and si.is_boardgame = true
     and si.is_boardgame_confirmed = true
     and si.listing_status = 'LISTED'
-  order by si.price asc nulls last, s.name asc
+  order by
+    case
+      when si.store_active = false then 2
+      when lower(coalesce(si.availability, '')) in (
+        'out_of_stock', 'outofstock', 'sold_out', 'soldout', 'sold-out',
+        'agotado', 'sin_stock', 'sin stock', 'unavailable', 'no_disponible', 'no disponible'
+      ) then 1
+      else 0
+    end,
+    si.price asc nulls last,
+    s.name asc
 `;
 
 const storeItemClickSql = `
