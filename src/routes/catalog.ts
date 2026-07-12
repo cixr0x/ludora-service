@@ -445,6 +445,7 @@ const itemOffersLateralSql = `
           'raw_price', si.raw_price,
           'currency', si.currency,
           'availability', si.availability,
+          'store_active', si.store_active,
           'listing_status', si.listing_status,
           'last_seen_at', si.last_seen_at
         )
@@ -740,6 +741,7 @@ const storeOffersSql = `
     si.raw_price,
     si.currency,
     si.availability,
+    si.store_active,
     si.listing_status,
     si.last_seen_at
   from store_items si
