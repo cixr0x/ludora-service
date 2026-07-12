@@ -654,7 +654,7 @@ describe('ludora service', () => {
       designers: [{ id: 10, name: 'Euclides Lopes' }],
       id: 77,
       mechanics: [{ id: 8, name: 'Action Drafting', name_es: 'Seleccion de acciones' }],
-      offers: [{ id: 300, store_active: false, store_name: 'Central de Juegos' }],
+      offers: [{ id: 300, store_active: false, store_name: 'Central de Juegos', store_platform: 'shopify' }],
       publishers: [{ id: 11, name: 'Pythagoras' }],
       rating: '7.37125',
       tutorials: [{ id: 9, source: 'youtube', title: 'Como jugar', url: 'https://youtube.example' }]
@@ -678,6 +678,7 @@ describe('ludora service', () => {
     expect(sql).toContain("ic.contribution_role = 'designer'");
     expect(sql).toContain('from item_publishers ip');
     expect(sql).toContain('from tutorial_links tl');
+    expect(sql).toContain("'store_platform', s.platform");
     expect(sql).toContain("'store_active', si.store_active");
     expect(sql).toContain('from store_items si');
     expect(sql).toContain('when si.store_active = false then 2');
@@ -753,7 +754,8 @@ describe('ludora service', () => {
         id: 300,
         price: '799.00',
         store_active: false,
-        store_name: 'Central de Juegos'
+        store_name: 'Central de Juegos',
+        store_platform: 'shopify'
       }
     ];
     const queries: Array<{ params?: unknown[]; sql: string }> = [];
@@ -771,6 +773,7 @@ describe('ludora service', () => {
     const sql = normalizeSql(queries[0]?.sql ?? '');
     expect(sql).toContain('from store_items si');
     expect(sql).toContain('join stores s on s.id = si.store_id');
+    expect(sql).toContain('s.platform as store_platform');
     expect(sql).toContain('si.store_active');
     expect(sql).toContain('si.listing_status =');
     expect(sql).toContain('si.item_id = $1');
