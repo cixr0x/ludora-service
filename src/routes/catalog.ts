@@ -448,6 +448,11 @@ const itemOffersLateralSql = `
           'availability', si.availability,
           'store_active', si.store_active,
           'listing_status', si.listing_status,
+          'is_bundle', exists (
+            select 1
+            from store_item_additional_items bundle_item
+            where bundle_item.store_item_id = si.id
+          ),
           'last_seen_at', si.last_seen_at
         )
         order by
@@ -764,6 +769,11 @@ const storeOffersSql = `
     si.availability,
     si.store_active,
     si.listing_status,
+    exists (
+      select 1
+      from store_item_additional_items bundle_item
+      where bundle_item.store_item_id = si.id
+    ) as is_bundle,
     si.last_seen_at
   from store_items si
   join stores s on s.id = si.store_id
