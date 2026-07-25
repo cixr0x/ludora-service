@@ -467,7 +467,15 @@ const itemOffersLateralSql = `
     ) as offers
     from store_items si
     join stores s on s.id = si.store_id
-    where si.item_id = i.id
+    where (
+      si.item_id = i.id
+      or exists (
+        select 1
+        from store_item_additional_items siai
+        where siai.store_item_id = si.id
+          and siai.item_id = i.id
+      )
+    )
       and si.is_boardgame = true
       and si.is_boardgame_confirmed = true
       and si.listing_status = 'LISTED'
@@ -759,7 +767,15 @@ const storeOffersSql = `
     si.last_seen_at
   from store_items si
   join stores s on s.id = si.store_id
-  where si.item_id = $1
+  where (
+    si.item_id = $1
+    or exists (
+      select 1
+      from store_item_additional_items siai
+      where siai.store_item_id = si.id
+        and siai.item_id = $1
+    )
+  )
     and si.is_boardgame = true
     and si.is_boardgame_confirmed = true
     and si.listing_status = 'LISTED'

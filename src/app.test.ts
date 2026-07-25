@@ -681,6 +681,9 @@ describe('ludora service', () => {
     expect(sql).toContain("'store_platform', s.platform");
     expect(sql).toContain("'store_active', si.store_active");
     expect(sql).toContain('from store_items si');
+    expect(sql).toContain('from store_item_additional_items siai');
+    expect(sql).toContain('siai.store_item_id = si.id');
+    expect(sql).toContain('siai.item_id = i.id');
     expect(sql).toContain('when si.store_active = false then 2');
     expect(sql).toContain("when lower(coalesce(si.availability, '')) in");
     expect(sql).toContain('where i.id = $1');
@@ -777,6 +780,9 @@ describe('ludora service', () => {
     expect(sql).toContain('si.store_active');
     expect(sql).toContain('si.listing_status =');
     expect(sql).toContain('si.item_id = $1');
+    expect(sql).toContain('from store_item_additional_items siai');
+    expect(sql).toContain('siai.store_item_id = si.id');
+    expect(sql).toContain('siai.item_id = $1');
     expect(sql).toContain('when si.store_active = false then 2');
     expect(sql).toContain("when lower(coalesce(si.availability, '')) in");
     expect(sql).toContain('si.price asc nulls last');
