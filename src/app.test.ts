@@ -632,6 +632,9 @@ describe('ludora service', () => {
     expect(sql).toContain('ct.item_id <> $1');
     expect(sql).toContain('join active_item i on i.id = rs.item_id');
     expect(sql).toContain('i.has_approved_listing = true');
+    expect(sql).toContain('i.is_expansion = false');
+    expect(sql).toContain("i.item_type = 'base_game'");
+    expect(sql).toContain('i.parent_item_id is null');
     expect(sql).toContain('order by rs.shared_taxonomy_count desc, i.rating desc nulls last, i.canonical_name asc, i.id asc');
     expect(sql).toContain('limit $2');
     expect(selectSql).toContain('i.id');
@@ -645,6 +648,45 @@ describe('ludora service', () => {
     expect(selectSql).not.toContain('i.complexity');
     expect(sql).not.toContain('left join lateral');
     expect(queries[0]?.params).toEqual([99, 12]);
+  });
+
+  it('lists active product expansions for a parent item', async () => {
+    const rows = [
+      {
+        canonical_name: 'Coffee Rush: Piece of Cake',
+        canonical_name_es: 'Coffee Rush: Pedazo de pastel',
+        id: 78,
+        image_url: 'https://cdn.example/coffee-expansion.jpg',
+        image_url_es: 'https://cdn.example/cafe-expansion.jpg'
+      }
+    ];
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows };
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items/77/expansions?limit=12');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      data: rows,
+      meta: {
+        count: 1,
+        limit: 12
+      }
+    });
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('from active_item i');
+    expect(sql).toContain('i.parent_item_id = $1');
+    expect(sql).toContain('i.is_expansion = true');
+    expect(sql).toContain("i.item_type = 'expansion'");
+    expect(sql).toContain('i.has_approved_listing = true');
+    expect(sql).toContain('order by i.rating desc nulls last, i.canonical_name asc, i.id asc');
+    expect(sql).toContain('limit $2');
+    expect(queries[0]?.params).toEqual([77, 12]);
   });
 
   it('returns one active item detail with public metadata', async () => {

@@ -160,6 +160,24 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
     }
   });
 
+  router.get('/items/:id/expansions', async (request, response, next) => {
+    try {
+      const itemId = integerPathParam(request.params.id);
+      const limit = integerQueryField(request.query.limit, 18, 1, 50);
+      const result = await database.query(itemExpansionsSql, [itemId, limit]);
+
+      response.json({
+        data: result.rows,
+        meta: {
+          count: result.rows.length,
+          limit
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/items/:id/taxonomy', async (request, response, next) => {
     try {
       const itemId = integerPathParam(request.params.id);
@@ -853,7 +871,22 @@ const relatedItemsSql = `
   from related_scores rs
   join active_item i on i.id = rs.item_id
   where i.has_approved_listing = true
+    and i.is_expansion = false
+    and i.item_type = 'base_game'
+    and i.parent_item_id is null
   order by rs.shared_taxonomy_count desc, i.rating desc nulls last, i.canonical_name asc, i.id asc
+  limit $2
+`;
+
+const itemExpansionsSql = `
+  select
+    ${relatedItemSelect}
+  from active_item i
+  where i.parent_item_id = $1
+    and i.is_expansion = true
+    and i.item_type = 'expansion'
+    and i.has_approved_listing = true
+  order by i.rating desc nulls last, i.canonical_name asc, i.id asc
   limit $2
 `;
 
