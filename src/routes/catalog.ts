@@ -402,6 +402,44 @@ const publicMetadataLateralSql = `
   ) publishers on true
 `;
 
+const parentItemsLateralSql = `
+  left join lateral (
+    select coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'id', parent_item.id,
+          'canonical_name', parent_item.canonical_name,
+          'canonical_name_es', parent_item.canonical_name_es
+        )
+        order by coalesce(parent_item.canonical_name_es, parent_item.canonical_name) asc, parent_item.id asc
+      ),
+      '[]'::jsonb
+    ) as parent_items
+    from (
+      select distinct parent.id, parent.canonical_name, parent.canonical_name_es
+      from active_item parent
+      where parent.has_approved_listing = true
+        and (
+          parent.id = i.parent_item_id
+          or exists (
+            select 1
+            from item_relationships relationship
+            where (
+              relationship.link_type = 'extension'
+              and relationship.item_a_id = i.id
+              and relationship.item_b_id = parent.id
+            )
+            or (
+              relationship.link_type = 'expansion'
+              and relationship.item_b_id = i.id
+              and relationship.item_a_id = parent.id
+            )
+          )
+        )
+    ) parent_item
+  ) parent_items on true
+`;
+
 const tutorialLateralSql = `
   left join lateral (
     select coalesce(
@@ -757,11 +795,13 @@ const itemDetailSql = `
     coalesce(families.families, '[]'::jsonb) as families,
     coalesce(designers.designers, '[]'::jsonb) as designers,
     coalesce(publishers.publishers, '[]'::jsonb) as publishers,
+    coalesce(parent_items.parent_items, '[]'::jsonb) as parent_items,
     coalesce(tutorials.tutorials, '[]'::jsonb) as tutorials,
     coalesce(offers.offers, '[]'::jsonb) as offers
   from active_item i
   ${taxonomyLateralSql}
   ${publicMetadataLateralSql}
+  ${parentItemsLateralSql}
   ${tutorialLateralSql}
   ${itemOffersLateralSql}
   where i.id = $1
@@ -882,7 +922,23 @@ const itemExpansionsSql = `
   select
     ${relatedItemSelect}
   from active_item i
-  where i.parent_item_id = $1
+  where (
+    i.parent_item_id = $1
+    or exists (
+      select 1
+      from item_relationships relationship
+      where (
+        relationship.link_type = 'extension'
+        and relationship.item_a_id = i.id
+        and relationship.item_b_id = $1
+      )
+      or (
+        relationship.link_type = 'expansion'
+        and relationship.item_b_id = i.id
+        and relationship.item_a_id = $1
+      )
+    )
+  )
     and i.is_expansion = true
     and i.item_type = 'expansion'
     and i.has_approved_listing = true

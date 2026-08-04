@@ -681,6 +681,13 @@ describe('ludora service', () => {
     const sql = normalizeSql(queries[0]?.sql ?? '');
     expect(sql).toContain('from active_item i');
     expect(sql).toContain('i.parent_item_id = $1');
+    expect(sql).toContain('from item_relationships relationship');
+    expect(sql).toContain("relationship.link_type = 'extension'");
+    expect(sql).toContain('relationship.item_a_id = i.id');
+    expect(sql).toContain('relationship.item_b_id = $1');
+    expect(sql).toContain("relationship.link_type = 'expansion'");
+    expect(sql).toContain('relationship.item_b_id = i.id');
+    expect(sql).toContain('relationship.item_a_id = $1');
     expect(sql).toContain('i.is_expansion = true');
     expect(sql).toContain("i.item_type = 'expansion'");
     expect(sql).toContain('i.has_approved_listing = true');
@@ -691,12 +698,16 @@ describe('ludora service', () => {
 
   it('returns one active item detail with public metadata', async () => {
     const row = {
-      canonical_name: 'Coffee Rush',
+      canonical_name: 'Coffee Rush Expansion',
       categories: [{ id: 5, name: 'Party Game', name_es: 'Juego de fiesta' }],
       designers: [{ id: 10, name: 'Euclides Lopes' }],
-      id: 77,
+      id: 88,
       mechanics: [{ id: 8, name: 'Action Drafting', name_es: 'Seleccion de acciones' }],
       offers: [{ id: 300, store_active: false, store_name: 'Central de Juegos', store_platform: 'shopify' }],
+      parent_items: [
+        { id: 76, canonical_name: 'Coffee Rush' },
+        { id: 77, canonical_name: 'Coffee Rush Revised' }
+      ],
       publishers: [{ id: 11, name: 'Pythagoras' }],
       rating: '7.37125',
       tutorials: [{ id: 9, source: 'youtube', title: 'Como jugar', url: 'https://youtube.example' }]
@@ -709,7 +720,7 @@ describe('ludora service', () => {
       }
     };
 
-    const response = await request(createApp({ database })).get('/api/items/77');
+    const response = await request(createApp({ database })).get('/api/items/88');
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ data: row });
@@ -719,6 +730,15 @@ describe('ludora service', () => {
     expect(sql).toContain('from item_contributors ic');
     expect(sql).toContain("ic.contribution_role = 'designer'");
     expect(sql).toContain('from item_publishers ip');
+    expect(sql).toContain("coalesce(parent_items.parent_items, '[]'::jsonb) as parent_items");
+    expect(sql).toContain('from active_item parent');
+    expect(sql).toContain('parent.id = i.parent_item_id');
+    expect(sql).toContain("relationship.link_type = 'extension'");
+    expect(sql).toContain('relationship.item_a_id = i.id');
+    expect(sql).toContain('relationship.item_b_id = parent.id');
+    expect(sql).toContain("relationship.link_type = 'expansion'");
+    expect(sql).toContain('relationship.item_b_id = i.id');
+    expect(sql).toContain('relationship.item_a_id = parent.id');
     expect(sql).toContain('from tutorial_links tl');
     expect(sql).toContain("'store_platform', s.platform");
     expect(sql).toContain("'store_active', si.store_active");
@@ -732,7 +752,7 @@ describe('ludora service', () => {
     expect(sql).toContain('when si.store_active = false then 2');
     expect(sql).toContain("when lower(coalesce(si.availability, '')) in");
     expect(sql).toContain('where i.id = $1');
-    expect(queries[0]?.params).toEqual([77]);
+    expect(queries[0]?.params).toEqual([88]);
   });
 
   it('falls back to published parent tutorials for expansions without direct tutorials', async () => {
