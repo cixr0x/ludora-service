@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import type { Database } from '../db.js';
 import type { EmbeddingClient } from '../embeddings.js';
+import { publicProductPath } from '../productRoutes.js';
 
 type CatalogRouterOptions = {
   embeddingClient?: EmbeddingClient;
@@ -81,6 +82,26 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
     }
   });
 
+  router.get('/items/prerender', async (request, response, next) => {
+    try {
+      const limit = integerQueryField(request.query.limit, 200, 1, 200);
+      const offset = integerQueryField(request.query.offset, 0, 0, 100000);
+      const result = await database.query(prerenderItemsSql, [limit, offset]);
+      const rows = result.rows.map((row) => withCanonicalProductPath(row as Record<string, unknown>));
+
+      response.json({
+        data: rows,
+        meta: {
+          count: rows.length,
+          limit,
+          offset
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/items/filter-options', async (_request, response, next) => {
     try {
       const result = await database.query(catalogFilterOptionsSql);
@@ -127,6 +148,21 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
       const itemId = integerPathParam(request.params.id);
       const result = await database.query(storeOffersSql, [itemId]);
       response.json({ data: result.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/items/:id/canonical-route', async (request, response, next) => {
+    try {
+      const itemId = integerPathParam(request.params.id);
+      const result = await database.query(canonicalProductRouteSql, [itemId]);
+      const row = result.rows[0] as Record<string, unknown> | undefined;
+      if (!row) {
+        throw httpError(404, 'Item not found');
+      }
+
+      response.redirect(301, publicProductPath(row.id, row.canonical_name_es, row.canonical_name));
     } catch (error) {
       next(error);
     }
@@ -264,6 +300,30 @@ const itemSearchResultSelect = `
   i.item_type,
   i.parent_item_id,
   i.is_expansion
+`;
+
+const prerenderItemSelect = `
+  i.id,
+  i.canonical_name,
+  i.canonical_name_es,
+  i.item_type,
+  i.parent_item_id,
+  i.bgg_id,
+  i.bgg_url,
+  i.year_published,
+  i.rating,
+  i.description,
+  i.description_es,
+  i.min_players,
+  i.max_players,
+  i.min_minutes,
+  i.max_minutes,
+  i.complexity,
+  i.min_age,
+  i.image_url,
+  i.image_url_es,
+  i.is_expansion,
+  i.updated_at
 `;
 
 const relatedItemSelect = `
@@ -807,6 +867,37 @@ const itemDetailSql = `
   where i.id = $1
 `;
 
+const prerenderItemsSql = `
+  with prerender_page as (
+    select ${prerenderItemSelect}
+    from active_item i
+    where i.has_approved_listing = true
+    order by i.canonical_name asc, i.id asc
+    limit $1
+    offset $2
+  )
+  select
+    i.*,
+    coalesce(categories.categories, '[]'::jsonb) as categories,
+    coalesce(mechanics.mechanics, '[]'::jsonb) as mechanics,
+    coalesce(families.families, '[]'::jsonb) as families,
+    coalesce(designers.designers, '[]'::jsonb) as designers,
+    coalesce(publishers.publishers, '[]'::jsonb) as publishers,
+    coalesce(parent_items.parent_items, '[]'::jsonb) as parent_items
+  from prerender_page i
+  ${taxonomyLateralSql}
+  ${publicMetadataLateralSql}
+  ${parentItemsLateralSql}
+  order by i.canonical_name asc, i.id asc
+`;
+
+const canonicalProductRouteSql = `
+  select i.id, i.canonical_name, i.canonical_name_es
+  from active_item i
+  where i.id = $1
+    and i.has_approved_listing = true
+`;
+
 const storeOffersSql = `
   select
     si.id,
@@ -1044,6 +1135,13 @@ const itemTaxonomySql = `
 function stringQueryField(value: unknown): string {
   const rawValue = Array.isArray(value) ? value[0] : value;
   return typeof rawValue === 'string' || typeof rawValue === 'number' ? String(rawValue).trim() : '';
+}
+
+function withCanonicalProductPath(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...row,
+    canonical_path: publicProductPath(row.id, row.canonical_name_es, row.canonical_name)
+  };
 }
 
 function integerQueryField(value: unknown, fallback: number, min: number, max: number): number {

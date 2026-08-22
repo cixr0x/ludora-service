@@ -696,6 +696,86 @@ describe('ludora service', () => {
     expect(queries[0]?.params).toEqual([77, 12]);
   });
 
+  it('returns product prerender records without volatile store offers', async () => {
+    const rows = [
+      {
+        canonical_name: 'Coffee Rush',
+        canonical_name_es: 'Café Express',
+        categories: [{ id: 5, name: 'Card Game' }],
+        description_es: 'Administra una cafetería concurrida.',
+        id: 77,
+        parent_items: []
+      }
+    ];
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows };
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items/prerender?limit=50&offset=100');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      data: [
+        {
+          ...rows[0],
+          canonical_path: '/game/77/cafe-express'
+        }
+      ],
+      meta: {
+        count: 1,
+        limit: 50,
+        offset: 100
+      }
+    });
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('with prerender_page as');
+    expect(sql).toContain('from active_item i');
+    expect(sql).toContain('from prerender_page i');
+    expect(sql).toContain('i.has_approved_listing = true');
+    expect(sql).toContain("coalesce(parent_items.parent_items, '[]'::jsonb) as parent_items");
+    expect(sql).not.toContain('from tutorial_links tl');
+    expect(sql).not.toContain('from store_items si');
+    expect(sql).not.toContain('as offers');
+    expect(sql).toContain('limit $1');
+    expect(sql).toContain('offset $2');
+    expect(queries[0]?.params).toEqual([50, 100]);
+  });
+
+  it('redirects a legacy numeric product URL to its canonical localized route', async () => {
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return {
+          rows: [{ id: 77, canonical_name: 'Coffee Rush', canonical_name_es: 'Café Express' }]
+        };
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items/77/canonical-route');
+
+    expect(response.status).toBe(301);
+    expect(response.headers.location).toBe('/game/77/cafe-express');
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('from active_item i');
+    expect(sql).toContain('i.id = $1');
+    expect(sql).toContain('i.has_approved_listing = true');
+    expect(queries[0]?.params).toEqual([77]);
+  });
+
+  it('returns 404 when a legacy numeric product URL has no public item', async () => {
+    const response = await request(createApp({ database: idleDatabase() })).get(
+      '/api/items/999999/canonical-route'
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: { message: 'Item not found' } });
+  });
+
   it('returns one active item detail with public metadata', async () => {
     const row = {
       canonical_name: 'Coffee Rush Expansion',
