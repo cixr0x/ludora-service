@@ -15,9 +15,15 @@ describe('public Nginx canonical HTTPS configuration', () => {
   it('redirects apex, legacy, and HTTP requests to the equivalent canonical path', () => {
     expect(siteConfig).toMatch(/server_name ludoradar\.mx;/);
     expect(siteConfig).toMatch(/server_name ludora\.bobbycrimson\.com;/);
-    expect(siteConfig).toMatch(/server_name ludoradar\.mx www\.ludoradar\.mx ludora\.bobbycrimson\.com;/);
-    expect(siteConfig.match(/return 301 https:\/\/www\.ludoradar\.mx\$request_uri;/g)).toHaveLength(3);
+    expect(siteConfig).toMatch(/server_name ludoradar\.mx www\.ludoradar\.mx;/);
+    expect(siteConfig.match(/return 301 https:\/\/www\.ludoradar\.mx\$request_uri;/g)).toHaveLength(4);
     expect(siteConfig).toMatch(/\/etc\/letsencrypt\/live\/ludora\.bobbycrimson\.com\/fullchain\.pem/);
+  });
+
+  it('preserves the legacy certificate webroot renewal challenge', () => {
+    expect(siteConfig).toMatch(
+      /server_name ludora\.bobbycrimson\.com;[\s\S]*location \^~ \/\.well-known\/acme-challenge\/[\s\S]*root \/var\/www\/html;[\s\S]*try_files \$uri =404;/,
+    );
   });
 
   it('returns 404 for unmatched HTTP and HTTPS hosts', () => {
