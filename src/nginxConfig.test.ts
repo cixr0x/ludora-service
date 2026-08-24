@@ -4,12 +4,26 @@ import { describe, expect, it } from 'vitest';
 const siteConfig = readFileSync(new URL('../ops/nginx/ludora.conf', import.meta.url), 'utf8');
 const appConfig = readFileSync(new URL('../ops/nginx/ludora-app.conf', import.meta.url), 'utf8');
 
-describe('public Nginx pre-cutover configuration', () => {
-  it('keeps the old HTTPS host and stages both new names over HTTP', () => {
-    expect(siteConfig).toMatch(/server_name ludora\.bobbycrimson\.com;/);
-    expect(siteConfig).toMatch(/server_name ludoradar\.mx www\.ludoradar\.mx;/);
+describe('public Nginx canonical HTTPS configuration', () => {
+  it('serves the application only on the canonical www HTTPS host', () => {
+    expect(siteConfig).toMatch(/server_name www\.ludoradar\.mx;[\s\S]*include \/etc\/nginx\/snippets\/ludora-app\.conf;/);
     expect(siteConfig).toMatch(/include \/etc\/nginx\/snippets\/ludora-app\.conf;/);
-    expect(siteConfig).not.toMatch(/\/etc\/letsencrypt\/live\/ludoradar\.mx/);
+    expect(siteConfig).toMatch(/ssl_certificate \/etc\/letsencrypt\/live\/ludoradar\.mx\/fullchain\.pem;/);
+    expect(siteConfig).toMatch(/ssl_certificate_key \/etc\/letsencrypt\/live\/ludoradar\.mx\/privkey\.pem;/);
+  });
+
+  it('redirects apex, legacy, and HTTP requests to the equivalent canonical path', () => {
+    expect(siteConfig).toMatch(/server_name ludoradar\.mx;/);
+    expect(siteConfig).toMatch(/server_name ludora\.bobbycrimson\.com;/);
+    expect(siteConfig).toMatch(/server_name ludoradar\.mx www\.ludoradar\.mx ludora\.bobbycrimson\.com;/);
+    expect(siteConfig.match(/return 301 https:\/\/www\.ludoradar\.mx\$request_uri;/g)).toHaveLength(3);
+    expect(siteConfig).toMatch(/\/etc\/letsencrypt\/live\/ludora\.bobbycrimson\.com\/fullchain\.pem/);
+  });
+
+  it('returns 404 for unmatched HTTP and HTTPS hosts', () => {
+    expect(siteConfig.match(/default_server/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(siteConfig.match(/server_name _;/g)).toHaveLength(2);
+    expect(siteConfig.match(/return 404;/g)).toHaveLength(2);
   });
 
   it('serves only known client routes and returns real unknown-path 404s', () => {
