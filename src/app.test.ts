@@ -745,6 +745,41 @@ describe('ludora service', () => {
     expect(queries[0]?.params).toEqual([50, 100]);
   });
 
+  it('supports stable id-keyset pagination for complete prerender builds', async () => {
+    const rows = [
+      {
+        canonical_name: 'Coffee Rush',
+        canonical_name_es: 'Café Express',
+        id: 77,
+        parent_items: []
+      }
+    ];
+    const queries: Array<{ params?: unknown[]; sql: string }> = [];
+    const database: Database = {
+      query: async (sql, params) => {
+        queries.push({ params, sql });
+        return { rows };
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/items/prerender?limit=50&after_id=50');
+
+    expect(response.status).toBe(200);
+    expect(response.body.meta).toEqual({
+      after_id: 50,
+      count: 1,
+      limit: 50,
+      next_after_id: 77,
+      pagination: 'keyset'
+    });
+    expect(response.body.data[0]?.canonical_path).toBe('/game/77/cafe-express');
+    const sql = normalizeSql(queries[0]?.sql ?? '');
+    expect(sql).toContain('i.id > $2');
+    expect(sql).toContain('order by i.id asc');
+    expect(sql).not.toContain('offset $2');
+    expect(queries[0]?.params).toEqual([50, 50]);
+  });
+
   it('redirects a legacy numeric product URL to its canonical localized route', async () => {
     const queries: Array<{ params?: unknown[]; sql: string }> = [];
     const database: Database = {

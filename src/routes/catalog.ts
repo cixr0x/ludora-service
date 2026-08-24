@@ -85,6 +85,25 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
   router.get('/items/prerender', async (request, response, next) => {
     try {
       const limit = integerQueryField(request.query.limit, 200, 1, 200);
+      if (request.query.after_id !== undefined) {
+        const afterId = integerQueryField(request.query.after_id, 0, 0, Number.MAX_SAFE_INTEGER);
+        const result = await database.query(prerenderItemsAfterIdSql, [limit, afterId]);
+        const rows = result.rows.map((row) => withCanonicalProductPath(row as Record<string, unknown>));
+        const nextAfterId = rows.length > 0 ? Number(rows.at(-1)?.id) : afterId;
+
+        response.json({
+          data: rows,
+          meta: {
+            after_id: afterId,
+            count: rows.length,
+            limit,
+            next_after_id: nextAfterId,
+            pagination: 'keyset'
+          }
+        });
+        return;
+      }
+
       const offset = integerQueryField(request.query.offset, 0, 0, 100000);
       const result = await database.query(prerenderItemsSql, [limit, offset]);
       const rows = result.rows.map((row) => withCanonicalProductPath(row as Record<string, unknown>));
@@ -889,6 +908,30 @@ const prerenderItemsSql = `
   ${publicMetadataLateralSql}
   ${parentItemsLateralSql}
   order by i.canonical_name asc, i.id asc
+`;
+
+const prerenderItemsAfterIdSql = `
+  with prerender_page as (
+    select ${prerenderItemSelect}
+    from active_item i
+    where i.has_approved_listing = true
+      and i.id > $2
+    order by i.id asc
+    limit $1
+  )
+  select
+    i.*,
+    coalesce(categories.categories, '[]'::jsonb) as categories,
+    coalesce(mechanics.mechanics, '[]'::jsonb) as mechanics,
+    coalesce(families.families, '[]'::jsonb) as families,
+    coalesce(designers.designers, '[]'::jsonb) as designers,
+    coalesce(publishers.publishers, '[]'::jsonb) as publishers,
+    coalesce(parent_items.parent_items, '[]'::jsonb) as parent_items
+  from prerender_page i
+  ${taxonomyLateralSql}
+  ${publicMetadataLateralSql}
+  ${parentItemsLateralSql}
+  order by i.id asc
 `;
 
 const canonicalProductRouteSql = `
