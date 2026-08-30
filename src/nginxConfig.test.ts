@@ -54,4 +54,14 @@ describe('public Nginx canonical HTTPS configuration', () => {
     expect(appConfig).toContain('location ~ ^/game/[0-9]+/[^/]+$');
     expect(appConfig).toContain('try_files $uri.html =404;');
   });
+
+  it('redirects invalid public game paths to the landing page without changing API behavior', () => {
+    expect(appConfig).toMatch(/location = \/game \{\s*return 302 \/;/);
+    expect(appConfig).toMatch(/location = \/game\/ \{\s*return 302 \/;/);
+    expect(appConfig).toMatch(/location \/game\/ \{\s*return 302 \/;/);
+    expect(appConfig.match(/proxy_intercept_errors on;/g)).toHaveLength(1);
+    expect(appConfig.match(/error_page 404 = @invalid_game_redirect;/g)).toHaveLength(2);
+    expect(appConfig).toMatch(/location @invalid_game_redirect \{\s*return 302 \/;/);
+    expect(appConfig).toMatch(/location \/api\/ \{[\s\S]*?proxy_pass http:\/\/127\.0\.0\.1:4000\/api\/[\s\S]*?\}/);
+  });
 });
