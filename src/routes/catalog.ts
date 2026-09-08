@@ -531,6 +531,37 @@ const parentItemsLateralSql = `
   ) parent_items on true
 `;
 
+// Resolve the bounded candidate IDs first: scanning every active parent for each
+// exported item otherwise repeats the relationship subquery across the catalog.
+const prerenderParentItemsLateralSql = `
+  left join lateral (
+    select coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'id', parent_item.id,
+          'canonical_name', parent_item.canonical_name,
+          'canonical_name_es', parent_item.canonical_name_es
+        )
+        order by coalesce(parent_item.canonical_name_es, parent_item.canonical_name) asc, parent_item.id asc
+      ),
+      '[]'::jsonb
+    ) as parent_items
+    from (
+      select distinct parent.id, parent.canonical_name, parent.canonical_name_es
+      from (
+        select i.parent_item_id as parent_id where i.parent_item_id is not null
+        union
+        select relationship.item_b_id from item_relationships relationship
+        where relationship.link_type = 'extension' and relationship.item_a_id = i.id
+        union
+        select relationship.item_a_id from item_relationships relationship
+        where relationship.link_type = 'expansion' and relationship.item_b_id = i.id
+      ) parent_ids
+      join active_item parent on parent.id = parent_ids.parent_id and parent.has_approved_listing = true
+    ) parent_item
+  ) parent_items on true
+`;
+
 const tutorialLateralSql = `
   left join lateral (
     select coalesce(
@@ -923,7 +954,7 @@ const prerenderItemsSql = `
   from prerender_page i
   ${taxonomyLateralSql}
   ${publicMetadataLateralSql}
-  ${parentItemsLateralSql}
+  ${prerenderParentItemsLateralSql}
   order by i.canonical_name asc, i.id asc
 `;
 
@@ -948,7 +979,7 @@ const prerenderItemsAfterIdSql = `
   from prerender_page i
   ${taxonomyLateralSql}
   ${publicMetadataLateralSql}
-  ${parentItemsLateralSql}
+  ${prerenderParentItemsLateralSql}
   order by i.id asc
 `;
 
