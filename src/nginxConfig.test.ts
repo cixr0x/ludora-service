@@ -47,21 +47,15 @@ describe('public Nginx canonical HTTPS configuration', () => {
     expect(appConfig).toMatch(/try_files \$uri =404;/);
   });
 
-  it('preserves canonical product routing and redirects', () => {
-    expect(appConfig).toContain('location ~ ^/game/([0-9]+)/?$');
-    expect(appConfig).toContain('rewrite ^/game/([0-9]+)/?$ /api/items/$1/canonical-route break;');
+  it('serves generated content and resolves misses against the selected publication', () => {
+    expect(appConfig).toContain('location ~ ^/(?:game|juegos-de-mesa|categorias|categoria)(?:/|$)');
+    expect(appConfig).toContain('try_files $uri.html @published_route;');
+    expect(appConfig).toContain('rewrite ^ /api/published-route break;');
+    expect(appConfig).toContain('proxy_set_header X-Ludo-Route $request_uri;');
     expect(appConfig).toContain('proxy_pass http://127.0.0.1:4000;');
-    expect(appConfig).toContain('location ~ ^/game/[0-9]+/[^/]+$');
-    expect(appConfig).toContain('try_files $uri.html =404;');
-  });
-
-  it('redirects invalid public game paths to the landing page without changing API behavior', () => {
-    expect(appConfig).toMatch(/location = \/game \{\s*return 302 \/;/);
-    expect(appConfig).toMatch(/location = \/game\/ \{\s*return 302 \/;/);
-    expect(appConfig).toMatch(/location \/game\/ \{\s*return 302 \/;/);
-    expect(appConfig.match(/proxy_intercept_errors on;/g)).toHaveLength(1);
-    expect(appConfig.match(/error_page 404 = @invalid_game_redirect;/g)).toHaveLength(2);
-    expect(appConfig).toMatch(/location @invalid_game_redirect \{\s*return 302 \/;/);
-    expect(appConfig).toMatch(/location \/api\/ \{[\s\S]*?proxy_pass http:\/\/127\.0\.0\.1:4000\/api\/[\s\S]*?\}/);
+    expect(appConfig).not.toContain('@invalid_game_redirect');
+    expect(appConfig).not.toContain('return 302 /;');
+    expect(appConfig).not.toContain('/canonical-route');
+    expect(appConfig).not.toContain('proxy_intercept_errors on;');
   });
 });

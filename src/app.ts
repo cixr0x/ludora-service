@@ -11,6 +11,7 @@ import {
 import { createCatalogRouter } from './routes/catalog.js';
 import { createContactRouter } from './routes/contact.js';
 import { createHealthRouter } from './routes/health.js';
+import { createPublishedRouteRouter } from './routes/publishedRoutes.js';
 
 type HttpError = Error & {
   status?: number;
@@ -25,6 +26,7 @@ type CreateAppOptions = {
   publicApiRateLimit?: RateLimitOptions;
   publicApiStrictRateLimit?: RateLimitOptions;
   trustProxy?: boolean;
+  publishedSiteRoot?: string;
 };
 
 export function createApp({
@@ -34,7 +36,8 @@ export function createApp({
   embeddingModel,
   publicApiRateLimit,
   publicApiStrictRateLimit,
-  trustProxy
+  trustProxy,
+  publishedSiteRoot
 }: CreateAppOptions): Express {
   const app = express();
   const api = Router();
@@ -57,6 +60,7 @@ export function createApp({
   api.use(express.json());
 
   api.use(createHealthRouter());
+  api.use(createPublishedRouteRouter(publishedSiteRoot));
   api.use(createContactRouter(database));
   api.use(createCatalogRouter(database, { embeddingClient, embeddingModel }));
   app.use('/api', api);
