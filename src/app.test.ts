@@ -696,7 +696,7 @@ describe('ludora service', () => {
     expect(queries[0]?.params).toEqual([77, 12]);
   });
 
-  it('returns product prerender records without volatile store offers', async () => {
+  it('preserves offset prerender fields while adding comparison data', async () => {
     const rows = [
       {
         canonical_name: 'Coffee Rush',
@@ -711,7 +711,8 @@ describe('ludora service', () => {
     const database: Database = {
       query: async (sql, params) => {
         queries.push({ params, sql });
-        return { rows };
+        if (sql.includes('max(i.id)')) return { rows: [{ max_id: 90 }] };
+        return { rows: sql.includes('with prerender_page as') ? rows : [] };
       }
     };
 
@@ -722,16 +723,19 @@ describe('ludora service', () => {
       data: [
         {
           ...rows[0],
-          canonical_path: '/game/77/cafe-express'
+          canonical_path: '/game/77/cafe-express',
+          offers: [], related_items: [], expansion_items: []
         }
       ],
       meta: {
         count: 1,
         limit: 50,
-        offset: 100
+        offset: 100,
+        max_id: 90,
+        export_version: 2
       }
     });
-    const sql = normalizeSql(queries[0]?.sql ?? '');
+    const sql = normalizeSql(queries[1]?.sql ?? '');
     expect(sql).toContain('with prerender_page as');
     expect(sql).toContain('from active_item i');
     expect(sql).toContain('from prerender_page i');
@@ -742,7 +746,7 @@ describe('ludora service', () => {
     expect(sql).not.toContain('as offers');
     expect(sql).toContain('limit $1');
     expect(sql).toContain('offset $2');
-    expect(queries[0]?.params).toEqual([50, 100]);
+    expect(queries[1]?.params).toEqual([50, 100, 90]);
   });
 
   it('supports stable id-keyset pagination for complete prerender builds', async () => {
@@ -758,7 +762,8 @@ describe('ludora service', () => {
     const database: Database = {
       query: async (sql, params) => {
         queries.push({ params, sql });
-        return { rows };
+        if (sql.includes('max(i.id)')) return { rows: [{ max_id: 90 }] };
+        return { rows: sql.includes('with prerender_page as') ? rows : [] };
       }
     };
 
@@ -770,14 +775,16 @@ describe('ludora service', () => {
       count: 1,
       limit: 50,
       next_after_id: 77,
-      pagination: 'keyset'
+      pagination: 'keyset',
+      max_id: 90,
+      export_version: 2
     });
     expect(response.body.data[0]?.canonical_path).toBe('/game/77/cafe-express');
-    const sql = normalizeSql(queries[0]?.sql ?? '');
+    const sql = normalizeSql(queries[1]?.sql ?? '');
     expect(sql).toContain('i.id > $2');
     expect(sql).toContain('order by i.id asc');
     expect(sql).not.toContain('offset $2');
-    expect(queries[0]?.params).toEqual([50, 50]);
+    expect(queries[1]?.params).toEqual([50, 50, 90]);
   });
 
   it('redirects a legacy numeric product URL to its canonical localized route', async () => {

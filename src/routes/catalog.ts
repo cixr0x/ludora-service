@@ -3,6 +3,7 @@ import { Router } from 'express';
 import type { Database } from '../db.js';
 import type { EmbeddingClient } from '../embeddings.js';
 import { publicProductPath } from '../productRoutes.js';
+import { enrichExportRows, exportCursor, exportMaxId, validateExportRows } from '../catalog/seoExport.js';
 
 type CatalogRouterOptions = {
   embeddingClient?: EmbeddingClient;
@@ -85,10 +86,16 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
   router.get('/items/prerender', async (request, response, next) => {
     try {
       const limit = integerQueryField(request.query.limit, 200, 1, 200);
-      if (request.query.after_id !== undefined) {
-        const afterId = integerQueryField(request.query.after_id, 0, 0, Number.MAX_SAFE_INTEGER);
-        const result = await database.query(prerenderItemsAfterIdSql, [limit, afterId]);
-        const rows = result.rows.map((row) => withCanonicalProductPath(row as Record<string, unknown>));
+      const afterId = exportCursor(request.query.after_id, 'after_id');
+      const requestedMaxId = exportCursor(request.query.maxId, 'maxId');
+      if (afterId !== undefined && requestedMaxId !== undefined && afterId > requestedMaxId) {
+        throw httpError(400, 'after_id must not exceed maxId');
+      }
+      const maxId = requestedMaxId ?? await exportMaxId(database);
+      if (afterId !== undefined) {
+        const result = await database.query(prerenderItemsAfterIdSql, [limit, afterId, maxId]);
+        const rows = (await enrichExportRows(database, validateExportRows(result.rows, limit, maxId, afterId), maxId))
+          .map(withCanonicalProductPath);
         const nextAfterId = rows.length > 0 ? Number(rows.at(-1)?.id) : afterId;
 
         response.json({
@@ -98,22 +105,27 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
             count: rows.length,
             limit,
             next_after_id: nextAfterId,
-            pagination: 'keyset'
+            pagination: 'keyset',
+            max_id: maxId,
+            export_version: 2
           }
         });
         return;
       }
 
       const offset = integerQueryField(request.query.offset, 0, 0, 100000);
-      const result = await database.query(prerenderItemsSql, [limit, offset]);
-      const rows = result.rows.map((row) => withCanonicalProductPath(row as Record<string, unknown>));
+      const result = await database.query(prerenderItemsSql, [limit, offset, maxId]);
+      const rows = (await enrichExportRows(database, validateExportRows(result.rows, limit, maxId), maxId))
+        .map(withCanonicalProductPath);
 
       response.json({
         data: rows,
         meta: {
           count: rows.length,
           limit,
-          offset
+          offset,
+          max_id: maxId,
+          export_version: 2
         }
       });
     } catch (error) {
@@ -588,7 +600,11 @@ const itemOffersLateralSql = `
             from store_item_additional_items bundle_item
             where bundle_item.store_item_id = si.id
           ),
-          'last_seen_at', si.last_seen_at
+          'last_seen_at', si.last_seen_at,
+          'last_updated', si.last_updated,
+          'refreshed_date', si.refreshed_date,
+          'language', si.language,
+          'store_updated_at', s.updated_at
         )
         order by
           case
@@ -891,6 +907,7 @@ const prerenderItemsSql = `
     select ${prerenderItemSelect}
     from active_item i
     where i.has_approved_listing = true
+      and i.id <= $3
     order by i.canonical_name asc, i.id asc
     limit $1
     offset $2
@@ -916,6 +933,7 @@ const prerenderItemsAfterIdSql = `
     from active_item i
     where i.has_approved_listing = true
       and i.id > $2
+      and i.id <= $3
     order by i.id asc
     limit $1
   )
@@ -966,7 +984,11 @@ const storeOffersSql = `
       from store_item_additional_items bundle_item
       where bundle_item.store_item_id = si.id
     ) as is_bundle,
-    si.last_seen_at
+    si.last_seen_at,
+    si.last_updated,
+    si.refreshed_date,
+    si.language,
+    s.updated_at as store_updated_at
   from store_items si
   join stores s on s.id = si.store_id
   where (
