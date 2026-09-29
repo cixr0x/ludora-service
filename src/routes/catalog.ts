@@ -639,10 +639,10 @@ const itemOffersLateralSql = `
         )
         order by
           case
-            when si.store_active = false then 2
+            when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2
             when lower(coalesce(si.availability, '')) in (
               'out_of_stock', 'outofstock', 'sold_out', 'soldout', 'sold-out',
-              'agotado', 'sin_stock', 'sin stock', 'unavailable', 'no_disponible', 'no disponible'
+              'agotado', 'sin_stock', 'sin stock'
             ) then 1
             else 0
           end,
@@ -666,6 +666,7 @@ const itemOffersLateralSql = `
       and si.is_boardgame = true
       and si.is_boardgame_confirmed = true
       and si.listing_status = 'LISTED'
+      and si.store_active = true
   ) offers on true
 `;
 
@@ -1034,12 +1035,13 @@ const storeOffersSql = `
     and si.is_boardgame = true
     and si.is_boardgame_confirmed = true
     and si.listing_status = 'LISTED'
+      and si.store_active = true
   order by
     case
-      when si.store_active = false then 2
+      when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2
       when lower(coalesce(si.availability, '')) in (
         'out_of_stock', 'outofstock', 'sold_out', 'soldout', 'sold-out',
-        'agotado', 'sin_stock', 'sin stock', 'unavailable', 'no_disponible', 'no disponible'
+        'agotado', 'sin_stock', 'sin stock'
       ) then 1
       else 0
     end,

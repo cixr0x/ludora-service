@@ -825,7 +825,7 @@ describe('ludora service', () => {
       designers: [{ id: 10, name: 'Euclides Lopes' }],
       id: 88,
       mechanics: [{ id: 8, name: 'Action Drafting', name_es: 'Seleccion de acciones' }],
-      offers: [{ id: 300, store_active: false, store_name: 'Central de Juegos', store_platform: 'shopify' }],
+      offers: [{ id: 300, store_active: true, availability: 'unavailable', store_name: 'Central de Juegos', store_platform: 'shopify' }],
       parent_items: [
         { id: 76, canonical_name: 'Coffee Rush' },
         { id: 77, canonical_name: 'Coffee Rush Revised' }
@@ -871,7 +871,9 @@ describe('ludora service', () => {
     expect(sql).toContain('siai.item_id = i.id');
     expect(sql).toContain('from store_item_additional_items bundle_item');
     expect(sql).toContain('bundle_item.store_item_id = si.id');
-    expect(sql).toContain('when si.store_active = false then 2');
+    expect(sql).toContain('and si.store_active = true');
+    expect(sql).toContain("when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2");
+    expect(sql).not.toContain("and si.availability <> 'unavailable'");
     expect(sql).toContain("when lower(coalesce(si.availability, '')) in");
     expect(sql).toContain('where i.id = $1');
     expect(queries[0]?.params).toEqual([88]);
@@ -938,12 +940,12 @@ describe('ludora service', () => {
   it('returns public store offers for one item', async () => {
     const rows = [
       {
-        availability: 'in_stock',
+        availability: 'unavailable',
         currency: 'MXN',
         game_title: 'Coffee Rush',
         id: 300,
         price: '799.00',
-        store_active: false,
+        store_active: true,
         store_name: 'Central de Juegos',
         store_platform: 'shopify'
       }
@@ -973,7 +975,9 @@ describe('ludora service', () => {
     expect(sql).toContain('from store_item_additional_items bundle_item');
     expect(sql).toContain('bundle_item.store_item_id = si.id');
     expect(sql).toContain('as is_bundle');
-    expect(sql).toContain('when si.store_active = false then 2');
+    expect(sql).toContain('and si.store_active = true');
+    expect(sql).toContain("when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2");
+    expect(sql).not.toContain("and si.availability <> 'unavailable'");
     expect(sql).toContain("when lower(coalesce(si.availability, '')) in");
     expect(sql).toContain('si.price asc nulls last');
     expect(queries[0]?.params).toEqual([77]);

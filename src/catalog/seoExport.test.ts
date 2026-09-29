@@ -29,6 +29,9 @@ describe('complete SEO export', () => {
       expansion_items: [{ id: '81', canonical_name: 'Expansion' }]
     });
     expect(calls).toHaveLength(5);
+    expect(calls[2].sql).toContain('and si.store_active = true');
+    expect(calls[2].sql).toContain("('unavailable', 'no_disponible', 'no disponible') then 2");
+    expect(calls[2].sql).not.toContain("and si.availability <> 'unavailable'");
     expect(calls[1].params).toEqual([200, 0, 90]);
     expect(calls[1].sql).toContain('i.id <= $3');
     expect(calls.slice(2).every(call => JSON.stringify(call.params?.[0]) === '[77]')).toBe(true);
