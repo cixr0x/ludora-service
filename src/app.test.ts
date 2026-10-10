@@ -865,10 +865,9 @@ describe('ludora service', () => {
     expect(sql).toContain("'store_platform', s.platform");
     expect(sql).toContain("'store_active', si.store_active");
     expect(sql).toContain("'is_bundle', exists");
-    expect(sql).toContain('from store_items si');
-    expect(sql).toContain('from store_item_additional_items siai');
-    expect(sql).toContain('siai.store_item_id = si.id');
-    expect(sql).toContain('siai.item_id = i.id');
+    expect(sql).toContain('select direct_offer.id from store_items direct_offer where direct_offer.item_id = i.id');
+    expect(sql).toContain('union select additional.store_item_id from store_item_additional_items additional where additional.item_id = i.id');
+    expect(sql).toContain('join store_items si on si.id = matching_offers.id');
     expect(sql).toContain('from store_item_additional_items bundle_item');
     expect(sql).toContain('bundle_item.store_item_id = si.id');
     expect(sql).toContain('and si.store_active = true');

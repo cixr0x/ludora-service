@@ -652,18 +652,20 @@ const itemOffersLateralSql = `
       ),
       '[]'::jsonb
     ) as offers
-    from store_items si
+    from (
+      select direct_offer.id
+      from store_items direct_offer
+      where direct_offer.item_id = i.id
+
+      union
+
+      select additional.store_item_id
+      from store_item_additional_items additional
+      where additional.item_id = i.id
+    ) matching_offers
+    join store_items si on si.id = matching_offers.id
     join stores s on s.id = si.store_id
-    where (
-      si.item_id = i.id
-      or exists (
-        select 1
-        from store_item_additional_items siai
-        where siai.store_item_id = si.id
-          and siai.item_id = i.id
-      )
-    )
-      and si.is_boardgame = true
+    where si.is_boardgame = true
       and si.is_boardgame_confirmed = true
       and si.listing_status = 'LISTED'
       and si.store_active = true
