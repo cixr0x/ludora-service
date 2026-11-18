@@ -964,6 +964,7 @@ describe('ludora service', () => {
     const sql = normalizeSql(queries[0]?.sql ?? '');
     expect(sql).toContain('from store_items si');
     expect(sql).toContain('join stores s on s.id = si.store_id');
+    expect(sql).toContain('and s.active = true');
     expect(sql).toContain('s.platform as store_platform');
     expect(sql).toContain('si.store_active');
     expect(sql).toContain('si.listing_status =');

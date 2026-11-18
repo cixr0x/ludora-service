@@ -23,9 +23,11 @@ describe('item-detail offer lookup', () => {
     const response = await request(createApp({ database })).get('/api/items/3');
 
     expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({ id: 3, offers: [] });
     expect(calls).toHaveLength(1);
     expect(calls[0].params).toEqual([3]);
     expect(normalizeSql(calls[0].sql)).toContain(fixtureJoin('OPTIMIZED'));
     expect(normalizeSql(calls[0].sql)).not.toContain(fixtureJoin('ORIGINAL'));
+    expect(normalizeSql(calls[0].sql)).toContain('and s.active = true');
   });
 });

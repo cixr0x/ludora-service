@@ -1,11 +1,14 @@
 -- Read-only relational parity fixture: only CTE values and SELECTs.
 -- The route test binds the optimized join to the actual item-detail query.
-with stores(id, name, platform, canonical_domain, website_url, logo_url, country, updated_at) as (
+with stores(id, name, platform, canonical_domain, website_url, logo_url, country, updated_at,
+  active, discovery_active, update_active) as (
   values
     (1::bigint, 'Alpha', 'shopify', 'alpha.test', 'https://alpha.test',
-      'https://alpha.test/logo.png', 'MX', '2026-10-01T00:00:00Z'::timestamptz),
+      'https://alpha.test/logo.png', 'MX', '2026-10-01T00:00:00Z'::timestamptz, true, false, false),
     (2::bigint, 'Beta', 'woocommerce', 'beta.test', 'https://beta.test',
-      null::text, 'MX', '2026-10-02T00:00:00Z'::timestamptz)
+      null::text, 'MX', '2026-10-02T00:00:00Z'::timestamptz, true, true, false),
+    (3::bigint, 'Gamma', 'custom', 'gamma.test', 'https://gamma.test',
+      null::text, 'MX', '2026-10-02T00:00:00Z'::timestamptz, false, true, true)
 ), offer_rows(id, item_id, store_id, price, availability,
   is_boardgame, is_boardgame_confirmed, listing_status, store_active) as (
   values
@@ -32,9 +35,12 @@ with stores(id, name, platform, canonical_domain, website_url, logo_url, country
     (806, 8, 1, 0, 'Sin Stock', true, true, 'LISTED', true),
     (807, 8, 1, 5, 'unavailable', true, true, 'LISTED', true),
     (808, 8, 1, 0, 'NO DISPONIBLE', true, true, 'LISTED', true),
+    (809, 8, 3, 2, 'available', true, true, 'LISTED', true),
+    (810, 99, 3, 1, 'available', true, true, 'LISTED', true),
     (901, 9, 1, 10, 'available', true, true, 'LISTED', true),
     (1001, 10, 1, 20, 'available', true, true, 'LISTED', true),
-    (1002, 99, 1, 10, 'available', true, true, 'LISTED', true)
+    (1002, 99, 1, 10, 'available', true, true, 'LISTED', true),
+    (1101, 11, 3, 5, 'available', true, true, 'LISTED', true)
 ), store_items as (
   select offer_rows.*,
     'https://store.test/products/' || id::text as source_url,
@@ -61,6 +67,7 @@ with stores(id, name, platform, canonical_domain, website_url, logo_url, country
     (501, 99),
     (9995, 5),
     (701, 7),
+    (810, 8),
     (901, 99),
     (1002, 10)
 ), fixture_items(id, case_name, expected_ids, expected_bundles) as (
@@ -72,11 +79,12 @@ with stores(id, name, platform, canonical_domain, website_url, logo_url, country
     (5, 'unrelated and missing listings stay excluded', array[501]::bigint[], array[true]),
     (6, 'no matching offers produces an empty array', array[]::bigint[], array[]::boolean[]),
     (7, 'a matching offer with a missing store stays excluded', array[]::bigint[], array[]::boolean[]),
-    (8, 'availability then price then store name then ID ordering',
+    (8, 'hidden-store direct and bundle offers are excluded from mixed lists',
       array[801,802,803,804,806,805,808,807]::bigint[],
       array[false,false,false,false,false,false,false,false]),
     (9, 'primary offer retains bundle flag for other contained games', array[901]::bigint[], array[true]),
-    (10, 'multiple offers from one store stay distinct and sorted', array[1002,1001]::bigint[], array[true,false])
+    (10, 'multiple offers from one store stay distinct and sorted', array[1002,1001]::bigint[], array[true,false]),
+    (11, 'all matching offers from hidden stores produces an empty array', array[]::bigint[], array[]::boolean[])
 ), original_results as (
   select i.id, offers.offers
   from fixture_items i
@@ -144,6 +152,7 @@ left join lateral (
       and si.is_boardgame_confirmed = true
       and si.listing_status = 'LISTED'
       and si.store_active = true
+      and s.active = true
   ) offers on true
   -- END ORIGINAL JOIN
 ), optimized_results as (
@@ -215,6 +224,7 @@ left join lateral (
       and si.is_boardgame_confirmed = true
       and si.listing_status = 'LISTED'
       and si.store_active = true
+      and s.active = true
   ) offers on true
   -- END OPTIMIZED JOIN
 ), result_ids as (

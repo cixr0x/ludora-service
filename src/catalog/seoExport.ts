@@ -85,7 +85,8 @@ const exportOffersSql = `
   join store_items si on si.id = membership.store_item_id
   join stores s on s.id = si.store_id
   where si.is_boardgame = true and si.is_boardgame_confirmed = true and si.listing_status = 'LISTED'
-      and si.store_active = true
+    and si.store_active = true
+    and s.active = true
   order by membership.item_id,
     case when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2
       when lower(coalesce(si.availability, '')) in (

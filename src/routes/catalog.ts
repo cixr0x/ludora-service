@@ -669,6 +669,7 @@ const itemOffersLateralSql = `
       and si.is_boardgame_confirmed = true
       and si.listing_status = 'LISTED'
       and si.store_active = true
+      and s.active = true
   ) offers on true
 `;
 
@@ -1037,7 +1038,8 @@ const storeOffersSql = `
     and si.is_boardgame = true
     and si.is_boardgame_confirmed = true
     and si.listing_status = 'LISTED'
-      and si.store_active = true
+    and si.store_active = true
+    and s.active = true
   order by
     case
       when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2
