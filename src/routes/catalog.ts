@@ -23,6 +23,7 @@ type CatalogRouterOptions = {
 
 const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
 const MAX_SEMANTIC_DISTANCE = 0.62;
+const LUDOSCOPIO_GAME_WORD = /(?<![\p{L}\p{M}\p{N}\p{Pc}])juegos?(?![\p{L}\p{M}\p{N}\p{Pc}])/iu;
 
 export function createCatalogRouter(database: Database, options: CatalogRouterOptions = {}): Router {
   const router = Router();
@@ -214,10 +215,12 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
       }
 
       let semantic: { vector: string; model: string } | undefined;
-      if (filters.theme) {
+      const { theme } = filters;
+      if (theme) {
         if (!options.embeddingClient) throw ludoscopioUnavailable();
         try {
-          semantic = { vector: vectorLiteral(await options.embeddingClient.embed(filters.theme)), model: embeddingModel };
+          const embeddingInput = LUDOSCOPIO_GAME_WORD.test(theme) ? theme : `juego ${theme}`;
+          semantic = { vector: vectorLiteral(await options.embeddingClient.embed(embeddingInput)), model: embeddingModel };
         } catch {
           throw ludoscopioUnavailable();
         }

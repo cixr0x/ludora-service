@@ -51,7 +51,7 @@ const normalizeSql = (sql: string) => sql.replace(/\s+/g, ' ').trim().toLowerCas
 describe('Ludoscopio hybrid search', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('embeds only the interpreted theme and filters the catalog before limiting', async () => {
+  it('embeds the interpreted theme with game context and filters the catalog before limiting', async () => {
     const { app, query, interpret, embed } = fixture();
     const prompt = 'Somos cuatro y buscamos algo rápido y fácil sobre piratas';
     const filters = {
@@ -67,7 +67,7 @@ describe('Ludoscopio hybrid search', () => {
       data: [game], meta: { count: 1, limit: 7, filters: { ...filters, exactTitle: null, query: null } }
     });
     expect(interpret).toHaveBeenCalledExactlyOnceWith(prompt, taxonomy);
-    expect(embed).toHaveBeenCalledExactlyOnceWith('piratas');
+    expect(embed).toHaveBeenCalledExactlyOnceWith('juego piratas');
     const [rawSql, params] = query.mock.lastCall!;
     const sql = normalizeSql(rawSql);
     expect(sql).toMatch(/active_item i .*where i\.has_approved_listing = true .*coalesce\(i\.min_players, i\.max_players\) <= \$1 .*coalesce\(i\.max_players, i\.min_players\) >= \$1/);
@@ -110,6 +110,23 @@ describe('Ludoscopio hybrid search', () => {
     expect(embed).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { theme: 'piratas', embeddingInput: 'juego piratas' },
+    { theme: 'aventuras de videojuegos', embeddingInput: 'juego aventuras de videojuegos' },
+    { theme: 'JuegoÁgil', embeddingInput: 'juego JuegoÁgil' },
+    { theme: 'un Juego cooperativo', embeddingInput: 'un Juego cooperativo' },
+    { theme: 'piratas (JUEGOS)', embeddingInput: 'piratas (JUEGOS)' }
+  ])('uses $embeddingInput for a refinement with theme $theme', async ({ theme, embeddingInput }) => {
+    const { app, interpret, embed } = fixture();
+
+    const response = await request(app).post(endpoint).send({ filters: { theme } });
+
+    expect(response.status).toBe(200);
+    expect(response.body.meta.filters.theme).toBe(theme);
+    expect(interpret).not.toHaveBeenCalled();
+    expect(embed).toHaveBeenCalledExactlyOnceWith(embeddingInput);
+  });
+
   it('uses inferred themes for retrieval and applies taxonomy suggestions only to ranking', async () => {
     const { app, query, interpret, embed } = fixture(undefined, comparisonTaxonomy);
     const theme = 'Age of Empires: construcción de ciudades, economía y estrategia medieval';
@@ -126,7 +143,7 @@ describe('Ludoscopio hybrid search', () => {
     expect(response.body.meta.filters).toMatchObject({
       suggestedCategoryIds: [21, 35], suggestedMechanicIds: [53], categoryIds: [], mechanicIds: [8], theme
     });
-    expect(embed).toHaveBeenCalledExactlyOnceWith(theme);
+    expect(embed).toHaveBeenCalledExactlyOnceWith(`juego ${theme}`);
     const [rawSql, params] = query.mock.lastCall!;
     expect(params).toEqual([4, [8], '[0.1,0.2]', 'text-embedding-3-small', 0.62, [21, 35], [53], 7]);
     const sql = normalizeSql(rawSql);
