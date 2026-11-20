@@ -1,4 +1,5 @@
 import type { Database } from '../db.js';
+import { publicOfferAvailabilitySql } from './offerVisibility.js';
 
 type ExportRow = Record<string, unknown>;
 
@@ -86,10 +87,10 @@ const exportOffersSql = `
   join stores s on s.id = si.store_id
   where si.is_boardgame = true and si.is_boardgame_confirmed = true and si.listing_status = 'LISTED'
     and si.store_active = true
+    and ${publicOfferAvailabilitySql}
     and s.active = true
   order by membership.item_id,
-    case when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2
-      when lower(coalesce(si.availability, '')) in (
+    case when lower(coalesce(si.availability, '')) in (
         'out_of_stock', 'outofstock', 'sold_out', 'soldout', 'sold-out',
         'agotado', 'sin_stock', 'sin stock'
       ) then 1 else 0 end,

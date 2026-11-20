@@ -40,7 +40,13 @@ with stores(id, name, platform, canonical_domain, website_url, logo_url, country
     (901, 9, 1, 10, 'available', true, true, 'LISTED', true),
     (1001, 10, 1, 20, 'available', true, true, 'LISTED', true),
     (1002, 99, 1, 10, 'available', true, true, 'LISTED', true),
-    (1101, 11, 3, 5, 'available', true, true, 'LISTED', true)
+    (1101, 11, 3, 5, 'available', true, true, 'LISTED', true),
+    (1201, 12, 1, 4, '  NO---DISPONIBLE  ', true, true, 'LISTED', true),
+    (1202, 99, 1, 3, E'\tNO  DISPONIBLE\n', true, true, 'LISTED', true),
+    (1203, 12, 1, 1, 'no_disponible', true, true, 'LISTED', true),
+    (1204, 12, 1, 1, U&'NO\00A0DISPONIBLE', true, true, 'LISTED', true),
+    (1205, 99, 1, 3, U&'\FEFFunavailable', true, true, 'LISTED', true),
+    (1206, 12, 1, 2, U&'\2009NO\2028\2003-\3000DISPONIBLE\2029', true, true, 'LISTED', true)
 ), store_items as (
   select offer_rows.*,
     'https://store.test/products/' || id::text as source_url,
@@ -69,7 +75,9 @@ with stores(id, name, platform, canonical_domain, website_url, logo_url, country
     (701, 7),
     (810, 8),
     (901, 99),
-    (1002, 10)
+    (1002, 10),
+    (1202, 12),
+    (1205, 12)
 ), fixture_items(id, case_name, expected_ids, expected_bundles) as (
   values
     (1::bigint, 'primary offer', array[101]::bigint[], array[false]),
@@ -79,12 +87,14 @@ with stores(id, name, platform, canonical_domain, website_url, logo_url, country
     (5, 'unrelated and missing listings stay excluded', array[501]::bigint[], array[true]),
     (6, 'no matching offers produces an empty array', array[]::bigint[], array[]::boolean[]),
     (7, 'a matching offer with a missing store stays excluded', array[]::bigint[], array[]::boolean[]),
-    (8, 'hidden-store direct and bundle offers are excluded from mixed lists',
-      array[801,802,803,804,806,805,808,807]::bigint[],
-      array[false,false,false,false,false,false,false,false]),
+    (8, 'hidden stores and unavailable listings are excluded from mixed lists',
+      array[801,802,803,804,806,805]::bigint[],
+      array[false,false,false,false,false,false]),
     (9, 'primary offer retains bundle flag for other contained games', array[901]::bigint[], array[true]),
     (10, 'multiple offers from one store stay distinct and sorted', array[1002,1001]::bigint[], array[true,false]),
-    (11, 'all matching offers from hidden stores produces an empty array', array[]::bigint[], array[]::boolean[])
+    (11, 'all matching offers from hidden stores produce an empty array', array[]::bigint[], array[]::boolean[]),
+    (12, 'only legacy unavailable direct and bundle offers leaves the product without offers',
+      array[]::bigint[], array[]::boolean[])
 ), original_results as (
   select i.id, offers.offers
   from fixture_items i
@@ -124,7 +134,6 @@ left join lateral (
         )
         order by
           case
-            when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2
             when lower(coalesce(si.availability, '')) in (
               'out_of_stock', 'outofstock', 'sold_out', 'soldout', 'sold-out',
               'agotado', 'sin_stock', 'sin stock'
@@ -152,6 +161,7 @@ left join lateral (
       and si.is_boardgame_confirmed = true
       and si.listing_status = 'LISTED'
       and si.store_active = true
+      and translate(coalesce(si.availability, ''), U&'\0009\000A\000B\000C\000D\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF', repeat(' ', 24)) !~* '^ *(unavailable|no(_|[ -]+)disponible) *$'
       and s.active = true
   ) offers on true
   -- END ORIGINAL JOIN
@@ -194,7 +204,6 @@ left join lateral (
         )
         order by
           case
-            when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2
             when lower(coalesce(si.availability, '')) in (
               'out_of_stock', 'outofstock', 'sold_out', 'soldout', 'sold-out',
               'agotado', 'sin_stock', 'sin stock'
@@ -224,6 +233,7 @@ left join lateral (
       and si.is_boardgame_confirmed = true
       and si.listing_status = 'LISTED'
       and si.store_active = true
+      and translate(coalesce(si.availability, ''), U&'\0009\000A\000B\000C\000D\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF', repeat(' ', 24)) !~* '^ *(unavailable|no(_|[ -]+)disponible) *$'
       and s.active = true
   ) offers on true
   -- END OPTIMIZED JOIN

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import type { Database } from '../db.js';
+import { publicOfferAvailabilitySql } from '../catalog/offerVisibility.js';
 import type { EmbeddingClient } from '../embeddings.js';
 import {
   ludoscopioPlaytimeBounds,
@@ -702,7 +703,6 @@ const itemOffersLateralSql = `
         )
         order by
           case
-            when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2
             when lower(coalesce(si.availability, '')) in (
               'out_of_stock', 'outofstock', 'sold_out', 'soldout', 'sold-out',
               'agotado', 'sin_stock', 'sin stock'
@@ -732,6 +732,7 @@ const itemOffersLateralSql = `
       and si.is_boardgame_confirmed = true
       and si.listing_status = 'LISTED'
       and si.store_active = true
+      and ${publicOfferAvailabilitySql}
       and s.active = true
   ) offers on true
 `;
@@ -1213,10 +1214,10 @@ const storeOffersSql = `
     and si.is_boardgame_confirmed = true
     and si.listing_status = 'LISTED'
     and si.store_active = true
+    and ${publicOfferAvailabilitySql}
     and s.active = true
   order by
     case
-      when lower(coalesce(si.availability, '')) in ('unavailable', 'no_disponible', 'no disponible') then 2
       when lower(coalesce(si.availability, '')) in (
         'out_of_stock', 'outofstock', 'sold_out', 'soldout', 'sold-out',
         'agotado', 'sin_stock', 'sin stock'
