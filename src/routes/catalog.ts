@@ -201,15 +201,15 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
         const taxonomy = await loadLudoscopioTaxonomy(database);
         try {
           const interpreted = await options.ludoscopioInterpreter.interpret(input.prompt, taxonomy);
-          filters = parseLudoscopioInterpretation(interpreted);
-          validateLudoscopioTaxonomy(filters, taxonomy);
+          filters = validateLudoscopioTaxonomy(parseLudoscopioInterpretation(interpreted), taxonomy);
         } catch {
           throw ludoscopioUnavailable();
         }
       } else {
         filters = input.filters;
-        if (filters.categoryIds.length || filters.mechanicIds.length) {
-          validateLudoscopioTaxonomy(filters, await loadLudoscopioTaxonomy(database));
+        if (filters.categoryIds.length || filters.mechanicIds.length ||
+            filters.suggestedCategoryIds.length || filters.suggestedMechanicIds.length) {
+          filters = validateLudoscopioTaxonomy(filters, await loadLudoscopioTaxonomy(database));
         }
       }
 
@@ -959,26 +959,52 @@ function buildLudoscopioQuery(
     distanceOrderSql = 'semantic_distance asc, ';
   }
 
+  const traitCounts = [];
+  if (filters.suggestedCategoryIds.length) {
+    traitCounts.push(`(
+      select count(distinct ic.category_id)
+      from item_categories ic
+      where ic.item_id = i.id
+        and ic.category_id = any(${addParam(filters.suggestedCategoryIds)}::bigint[])
+    )`);
+  }
+  if (filters.suggestedMechanicIds.length) {
+    traitCounts.push(`(
+      select count(distinct im.mechanic_id)
+      from item_mechanics im
+      where im.item_id = i.id
+        and im.mechanic_id = any(${addParam(filters.suggestedMechanicIds)}::bigint[])
+    )`);
+  }
+  const hasSuggestions = traitCounts.length > 0;
+  const traitMatches = traitCounts.join(' + ');
+  const rankSql = semantic ? `${distanceSql} - (least(3, ${traitMatches}) * 0.025)` : traitMatches;
+  const traitOrderSql = hasSuggestions ? `trait_rank ${semantic ? 'asc' : 'desc'}, ` : '';
+  const orderSql = `${traitOrderSql}${distanceOrderSql}i.canonical_name asc, i.id asc`;
+  const candidateSelect = hasSuggestions
+    ? `i.id, ${distanceSql} as semantic_distance, ${rankSql} as trait_rank`
+    : `${itemSelect}, ${distanceSql} as semantic_distance`;
+
   const sql = `
     with candidates as (
-      select ${itemSelect}, ${distanceSql} as semantic_distance
+      select ${candidateSelect}
       from active_item i
       ${embeddingJoinSql}
       where ${whereSql.join('\n        and ')}
-      order by ${distanceOrderSql}i.canonical_name asc, i.id asc
+      order by ${orderSql}
       limit ${addParam(limit)}
     )
     select
-      i.*,
+      ${hasSuggestions ? `${itemSelect}, candidates.semantic_distance` : 'i.*'},
       coalesce(categories.categories, '[]'::jsonb) as categories,
       coalesce(mechanics.mechanics, '[]'::jsonb) as mechanics,
       coalesce(families.families, '[]'::jsonb) as families,
       coalesce(designers.designers, '[]'::jsonb) as designers,
       coalesce(publishers.publishers, '[]'::jsonb) as publishers
-    from candidates i
+    ${hasSuggestions ? 'from candidates join active_item i on i.id = candidates.id' : 'from candidates i'}
     ${taxonomyLateralSql}
     ${publicMetadataLateralSql}
-    order by ${distanceOrderSql}i.canonical_name asc, i.id asc
+    order by ${orderSql}
   `;
   return { params, sql };
 }

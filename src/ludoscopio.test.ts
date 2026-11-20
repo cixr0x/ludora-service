@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from './app.js';
 import type { Database } from './db.js';
+import { createOpenAILudoscopioInterpreter } from './ludoscopio.js';
 
 const emptyInterpretation = {
   players: null, playtimes: [], durationMin: null, durationMax: null,
-  complexityMin: null, complexityMax: null, categoryIds: [], mechanicIds: [], theme: null
+  complexityMin: null, complexityMax: null, categoryIds: [], mechanicIds: [],
+  suggestedCategoryIds: [], suggestedMechanicIds: [], theme: null
 };
 
 const taxonomy = {
@@ -16,9 +18,22 @@ const taxonomy = {
 
 const game = { id: '77', canonical_name: 'Sea Salt & Paper', categories: [], mechanics: [] };
 
-function fixture(exactTitle?: string) {
+const comparisonTaxonomy = {
+  categories: [
+    { id: 21, name: 'Medieval', name_es: 'Medieval' },
+    { id: 35, name: 'City Building', name_es: 'Construcción de ciudades' },
+    { id: 41, name: 'Economic', name_es: 'Económico' },
+    { id: 70, name: 'Civilization', name_es: 'Civilización' }
+  ],
+  mechanics: [
+    { id: 8, name: 'Tile Placement', name_es: 'Colocación de losetas' },
+    { id: 53, name: 'Resource Management', name_es: 'Gestión de recursos' }
+  ]
+};
+
+function fixture(exactTitle?: string, publicTaxonomy = taxonomy) {
   const query = vi.fn<Database['query']>(async (sql, params) => {
-    if (sql.includes('category_options')) return { rows: [taxonomy] };
+    if (sql.includes('category_options')) return { rows: [publicTaxonomy] };
     if (sql.includes('lower(btrim(i.canonical_name')) {
       return { rows: params?.[0] === exactTitle ? [game] : [] };
     }
@@ -87,8 +102,63 @@ describe('Ludoscopio hybrid search', () => {
     const response = await request(app).post(endpoint).send({ filters: { query: 'Sea %', mechanicIds: [8, 8], complexityMax: 2.5 } });
 
     expect(response.status).toBe(200);
-    expect(response.body.meta.filters).toMatchObject({ query: 'Sea %', mechanicIds: [8], complexityMax: 2.5 });
+    expect(response.body.meta.filters).toMatchObject({
+      query: 'Sea %', mechanicIds: [8], complexityMax: 2.5, suggestedCategoryIds: [], suggestedMechanicIds: []
+    });
     expect(query.mock.lastCall?.[1]).toEqual(['%Sea%', '%\\%%', 2.5, [8], 40]);
+    expect(interpret).not.toHaveBeenCalled();
+    expect(embed).not.toHaveBeenCalled();
+  });
+
+  it('uses inferred themes for retrieval and applies taxonomy suggestions only to ranking', async () => {
+    const { app, query, interpret, embed } = fixture(undefined, comparisonTaxonomy);
+    const theme = 'Age of Empires: construcción de ciudades, economía y estrategia medieval';
+    interpret.mockResolvedValueOnce({
+      ...emptyInterpretation, players: 4, mechanicIds: [8], theme,
+      suggestedCategoryIds: [53, 21, 999, 21, 35],
+      suggestedMechanicIds: [35, 53]
+    });
+
+    const response = await request(app).post(endpoint)
+      .send({ prompt: 'Como Age of Empires pero sin combate, para cuatro y con colocación de losetas', limit: 7 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.meta.filters).toMatchObject({
+      suggestedCategoryIds: [21, 35], suggestedMechanicIds: [53], categoryIds: [], mechanicIds: [8], theme
+    });
+    expect(embed).toHaveBeenCalledExactlyOnceWith(theme);
+    const [rawSql, params] = query.mock.lastCall!;
+    expect(params).toEqual([4, [8], '[0.1,0.2]', 'text-embedding-3-small', 0.62, [21, 35], [53], 7]);
+    const sql = normalizeSql(rawSql);
+    expect(sql).toMatch(/\(ise\.embedding <=> \$3::vector\) as semantic_distance/);
+    expect(sql).toMatch(/\(ise\.embedding <=> \$3::vector\) - .*least\(3, .*category_id = any\(\$6::bigint\[\]\).*mechanic_id = any\(\$7::bigint\[\]\).*0\.025/);
+    const eligibility = sql.slice(sql.indexOf('from active_item i'), sql.indexOf('order by'));
+    expect(eligibility).toContain('= cardinality($2::bigint[])');
+    expect(eligibility).toContain('(ise.embedding <=> $3::vector) <= $5');
+    expect(eligibility).not.toContain('$6');
+    expect(eligibility).not.toContain('$7');
+    expect(sql).toMatch(/order by .*rank asc, .*semantic_distance asc, i\.canonical_name asc, i\.id asc limit \$8/);
+    expect(sql).toMatch(/order by .*rank asc, .*semantic_distance asc, i\.canonical_name asc, i\.id asc$/);
+  });
+
+  it('keeps valid soft IDs bounded during refinement without retrieving an embedding for a removed theme', async () => {
+    const { app, query, interpret, embed } = fixture(undefined, comparisonTaxonomy);
+    const response = await request(app).post(endpoint).send({ filters: {
+      categoryIds: [21],
+      suggestedCategoryIds: [0, 21, 35, 41, 41, 999],
+      suggestedMechanicIds: [8, 53, '53', 7.5]
+    } });
+
+    expect(response.status).toBe(200);
+    expect(response.body.meta.filters).toMatchObject({
+      categoryIds: [21], suggestedCategoryIds: [21, 35, 41], suggestedMechanicIds: [8], theme: null
+    });
+    const [rawSql, params] = query.mock.lastCall!;
+    expect(params).toEqual([[21], [21, 35, 41], [8], 40]);
+    const sql = normalizeSql(rawSql);
+    expect(sql).toMatch(/= cardinality\(\$1::bigint\[\]\) order by .*rank desc, i\.canonical_name asc, i\.id asc limit \$4/);
+    expect(sql).toMatch(/order by .*rank desc, i\.canonical_name asc, i\.id asc$/);
+    expect(sql).not.toContain('item_search_embeddings');
     expect(interpret).not.toHaveBeenCalled();
     expect(embed).not.toHaveBeenCalled();
   });
@@ -97,7 +167,11 @@ describe('Ludoscopio hybrid search', () => {
     const { app, query, interpret, embed } = fixture('Sal y papel');
     const response = await request(app).post(endpoint).send({ prompt: ' Sal y papel ' });
     expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({ data: [game], meta: { filters: { exactTitle: 'Sal y papel', theme: null } } });
+    expect(response.body).toMatchObject({
+      data: [game], meta: { filters: {
+        exactTitle: 'Sal y papel', theme: null, suggestedCategoryIds: [], suggestedMechanicIds: []
+      } }
+    });
     expect(query.mock.lastCall?.[0]).toMatch(/lower\(btrim\(i\.canonical_name\)\).*lower\(btrim\(i\.canonical_name_es\)\)/s);
     expect(interpret).not.toHaveBeenCalled();
     expect(embed).not.toHaveBeenCalled();
@@ -133,8 +207,38 @@ describe('Ludoscopio hybrid search', () => {
     expect(response.body).toEqual({ error: { message: 'Ludoscopio search is temporarily unavailable' } });
   });
 
+  it('requests inferred suggestions and an expanded theme in the same strict interpretation', async () => {
+    const prompt = 'Quiero un juego como Age of Empires pero sin combate';
+    const structured = {
+      ...emptyInterpretation,
+      theme: 'Age of Empires, construcción de ciudades, economía y ambientación medieval',
+      suggestedCategoryIds: [21, 35]
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({
+      status: 'completed',
+      output: [{
+        type: 'message', role: 'assistant', status: 'completed',
+        content: [{ type: 'output_text', text: JSON.stringify(structured) }]
+      }]
+    }));
+    vi.stubGlobal('fetch', fetch);
+    const interpreter = createOpenAILudoscopioInterpreter('test-key');
+
+    await expect(interpreter.interpret(prompt, comparisonTaxonomy)).resolves.toEqual(structured);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const input = JSON.parse(String(fetch.mock.lastCall?.[1]?.body));
+    expect(input.text.format.schema.required).toEqual(expect.arrayContaining(['suggestedCategoryIds', 'suggestedMechanicIds']));
+    expect(input.text.format.schema.properties).toMatchObject({
+      suggestedCategoryIds: { type: 'array', items: { type: 'integer' } },
+      suggestedMechanicIds: { type: 'array', items: { type: 'integer' } }
+    });
+    expect(input.input[0].content).toContain('Age of Empires');
+    expect(input.input[0].content).toContain('sin combate');
+    expect(input.input[0].content).toContain('City Building');
+    expect(input.input[1]).toEqual({ role: 'user', content: prompt });
+  });
+
   it('requests a single strict Responses result from OpenAI and rejects a refusal', async () => {
-    const { createOpenAILudoscopioInterpreter } = await import('./ludoscopio.js');
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({
       status: 'completed',
       output: [{
