@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createDatabase } from './db.js';
 import { createOpenAIEmbeddingClient } from './embeddings.js';
+import { createOpenAILudoscopioInterpreter } from './ludoscopio.js';
 
 const config = loadConfig();
 
@@ -21,6 +22,7 @@ const app = createApp({
   corsOrigin: config.corsOrigin,
   embeddingClient,
   embeddingModel: config.embeddingModel,
+  ludoscopioInterpreter: config.openAiApiKey ? createOpenAILudoscopioInterpreter(config.openAiApiKey) : undefined,
   publicApiRateLimit: config.publicApiRateLimit,
   publicApiStrictRateLimit: config.publicApiStrictRateLimit,
   trustProxy: config.trustProxy

@@ -2,12 +2,23 @@ import { Router } from 'express';
 
 import type { Database } from '../db.js';
 import type { EmbeddingClient } from '../embeddings.js';
+import {
+  ludoscopioPlaytimeBounds,
+  parseLudoscopioFilters,
+  parseLudoscopioInterpretation,
+  parseLudoscopioRequest,
+  validateLudoscopioTaxonomy,
+  type LudoscopioFilters,
+  type LudoscopioInterpreter,
+  type LudoscopioTaxonomy
+} from '../ludoscopio.js';
 import { publicProductPath } from '../productRoutes.js';
 import { enrichExportRows, exportCursor, exportMaxId, validateExportRows } from '../catalog/seoExport.js';
 
 type CatalogRouterOptions = {
   embeddingClient?: EmbeddingClient;
   embeddingModel?: string;
+  ludoscopioInterpreter?: LudoscopioInterpreter;
 };
 
 const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
@@ -174,6 +185,51 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
     }
   });
 
+  router.post('/items/ludoscopio', async (request, response, next) => {
+    try {
+      const input = parseLudoscopioRequest(request.body);
+      let filters: LudoscopioFilters;
+      if ('prompt' in input) {
+        const exactFilters = parseLudoscopioFilters({ exactTitle: input.prompt });
+        const query = buildLudoscopioQuery(exactFilters, input.limit);
+        const exactMatches = await database.query(query.sql, query.params);
+        if (exactMatches.rows.length > 0) {
+          response.json(ludoscopioEnvelope(exactMatches.rows, input.limit, exactFilters));
+          return;
+        }
+        if (!options.ludoscopioInterpreter) throw ludoscopioUnavailable();
+        const taxonomy = await loadLudoscopioTaxonomy(database);
+        try {
+          const interpreted = await options.ludoscopioInterpreter.interpret(input.prompt, taxonomy);
+          filters = parseLudoscopioInterpretation(interpreted);
+          validateLudoscopioTaxonomy(filters, taxonomy);
+        } catch {
+          throw ludoscopioUnavailable();
+        }
+      } else {
+        filters = input.filters;
+        if (filters.categoryIds.length || filters.mechanicIds.length) {
+          validateLudoscopioTaxonomy(filters, await loadLudoscopioTaxonomy(database));
+        }
+      }
+
+      let semantic: { vector: string; model: string } | undefined;
+      if (filters.theme) {
+        if (!options.embeddingClient) throw ludoscopioUnavailable();
+        try {
+          semantic = { vector: vectorLiteral(await options.embeddingClient.embed(filters.theme)), model: embeddingModel };
+        } catch {
+          throw ludoscopioUnavailable();
+        }
+      }
+      const query = buildLudoscopioQuery(filters, input.limit, semantic);
+      const result = await database.query(query.sql, query.params);
+      response.json(ludoscopioEnvelope(result.rows, input.limit, filters));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/items/:id/stores', async (request, response, next) => {
     try {
       const itemId = integerPathParam(request.params.id);
@@ -273,6 +329,10 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
   return router;
 }
 
+// Both catalog fields use the same 1–5 scale.
+const publicComplexitySql = `case when i.complexity between 1 and 5 then i.complexity
+  when i.weight between 1 and 5 then i.weight end`;
+
 const itemSelect = `
   i.id,
   i.canonical_name,
@@ -292,7 +352,7 @@ const itemSelect = `
   i.max_players,
   i.min_minutes,
   i.max_minutes,
-  i.complexity,
+  ${publicComplexitySql} as complexity,
   i.min_age,
   i.image_url,
   i.image_url_es,
@@ -315,7 +375,7 @@ const itemSummarySelect = `
   i.max_players,
   i.min_minutes,
   i.max_minutes,
-  i.complexity,
+  ${publicComplexitySql} as complexity,
   i.image_url,
   i.image_url_es,
   i.has_approved_listing,
@@ -349,7 +409,7 @@ const prerenderItemSelect = `
   i.max_players,
   i.min_minutes,
   i.max_minutes,
-  i.complexity,
+  ${publicComplexitySql} as complexity,
   i.min_age,
   i.image_url,
   i.image_url_es,
@@ -760,11 +820,11 @@ function buildItemSearchQueryParts(filters: ItemSearchFilters): ItemSearchQueryP
   }
 
   if (filters.complexityMin !== undefined) {
-    whereSql.push(`i.complexity >= ${addParam(filters.complexityMin)}`);
+    whereSql.push(`${publicComplexitySql} >= ${addParam(filters.complexityMin)}`);
   }
 
   if (filters.complexityMax !== undefined) {
-    whereSql.push(`i.complexity <= ${addParam(filters.complexityMax)}`);
+    whereSql.push(`${publicComplexitySql} <= ${addParam(filters.complexityMax)}`);
   }
 
   if (filters.categoryIds.length > 0) {
@@ -851,6 +911,78 @@ function buildItemSearchResultsQuery(filters: ItemSearchFilters): { params: unkn
   return { params, sql };
 }
 
+function buildLudoscopioQuery(
+  filters: LudoscopioFilters,
+  limit: number,
+  semantic?: { vector: string; model: string }
+): { params: unknown[]; sql: string } {
+  const { addParam, params, whereSql } = buildItemSearchQueryParts({
+    categoryIds: filters.categoryIds,
+    complexityMin: filters.complexityMin ?? undefined,
+    complexityMax: filters.complexityMax ?? undefined,
+    mechanicIds: filters.mechanicIds,
+    players: filters.players ?? undefined,
+    query: filters.query ?? '',
+    limit,
+    offset: 0
+  });
+  if (filters.exactTitle) {
+    const title = addParam(filters.exactTitle);
+    whereSql.push(`(lower(btrim(i.canonical_name)) = lower(${title}) or lower(btrim(i.canonical_name_es)) = lower(${title}))`);
+  }
+  if (filters.durationMin !== null) whereSql.push(`i.min_minutes >= ${addParam(filters.durationMin)}`);
+  if (filters.durationMax !== null) {
+    whereSql.push('i.max_minutes > 0', `i.max_minutes <= ${addParam(filters.durationMax)}`);
+  }
+  if (filters.playtimes.length) {
+    const minMinutesSql = 'coalesce(i.min_minutes, i.max_minutes)';
+    const maxMinutesSql = 'coalesce(i.max_minutes, i.min_minutes)';
+    whereSql.push(`${minMinutesSql} > 0`, `${maxMinutesSql} >= ${minMinutesSql}`);
+    const overlaps = filters.playtimes.map((key) => {
+      const [min, max] = ludoscopioPlaytimeBounds[key];
+      const comparisons: string[] = [];
+      if (min !== undefined) comparisons.push(`${maxMinutesSql} >= ${addParam(min)}`);
+      if (max !== undefined) comparisons.push(`${minMinutesSql} <= ${addParam(max)}`);
+      return `(${comparisons.join(' and ')})`;
+    });
+    whereSql.push(`(${overlaps.join(' or ')})`);
+  }
+
+  let distanceSql = 'null::double precision';
+  let distanceOrderSql = '';
+  let embeddingJoinSql = '';
+  if (semantic) {
+    distanceSql = `(ise.embedding <=> ${addParam(semantic.vector)}::vector)`;
+    embeddingJoinSql = 'join item_search_embeddings ise on ise.item_id = i.id';
+    whereSql.push(`ise.model = ${addParam(semantic.model)}`);
+    whereSql.push(`${distanceSql} <= ${addParam(MAX_SEMANTIC_DISTANCE)}`);
+    distanceOrderSql = 'semantic_distance asc, ';
+  }
+
+  const sql = `
+    with candidates as (
+      select ${itemSelect}, ${distanceSql} as semantic_distance
+      from active_item i
+      ${embeddingJoinSql}
+      where ${whereSql.join('\n        and ')}
+      order by ${distanceOrderSql}i.canonical_name asc, i.id asc
+      limit ${addParam(limit)}
+    )
+    select
+      i.*,
+      coalesce(categories.categories, '[]'::jsonb) as categories,
+      coalesce(mechanics.mechanics, '[]'::jsonb) as mechanics,
+      coalesce(families.families, '[]'::jsonb) as families,
+      coalesce(designers.designers, '[]'::jsonb) as designers,
+      coalesce(publishers.publishers, '[]'::jsonb) as publishers
+    from candidates i
+    ${taxonomyLateralSql}
+    ${publicMetadataLateralSql}
+    order by ${distanceOrderSql}i.canonical_name asc, i.id asc
+  `;
+  return { params, sql };
+}
+
 const catalogFilterOptionsSql = `
   select
     coalesce(
@@ -896,6 +1028,19 @@ const catalogFilterOptionsSql = `
       '[]'::jsonb
     ) as mechanics
 `;
+
+async function loadLudoscopioTaxonomy(database: Database): Promise<LudoscopioTaxonomy> {
+  const result = await database.query(catalogFilterOptionsSql);
+  return (result.rows[0] as LudoscopioTaxonomy | undefined) ?? { categories: [], mechanics: [] };
+}
+
+function ludoscopioEnvelope(rows: unknown[], limit: number, filters: LudoscopioFilters) {
+  return { data: rows, meta: { count: rows.length, limit, filters } };
+}
+
+function ludoscopioUnavailable() {
+  return httpError(503, 'Ludoscopio search is temporarily unavailable');
+}
 
 const semanticItemsSql = `
   select

@@ -3,6 +3,7 @@ import express, { Router, type ErrorRequestHandler, type Express } from 'express
 
 import type { Database } from './db.js';
 import type { EmbeddingClient } from './embeddings.js';
+import type { LudoscopioInterpreter } from './ludoscopio.js';
 import {
   createPublicApiRateLimiter,
   createStrictPublicApiRateLimiter,
@@ -23,6 +24,7 @@ type CreateAppOptions = {
   corsOrigin?: string | string[];
   embeddingClient?: EmbeddingClient;
   embeddingModel?: string;
+  ludoscopioInterpreter?: LudoscopioInterpreter;
   publicApiRateLimit?: RateLimitOptions;
   publicApiStrictRateLimit?: RateLimitOptions;
   trustProxy?: boolean;
@@ -34,6 +36,7 @@ export function createApp({
   corsOrigin,
   embeddingClient,
   embeddingModel,
+  ludoscopioInterpreter,
   publicApiRateLimit,
   publicApiStrictRateLimit,
   trustProxy,
@@ -56,13 +59,14 @@ export function createApp({
     api.use('/contact', strictLimiter);
     api.use('/store-items/:id/clicks', strictLimiter);
     api.use('/items/semantic-search', strictLimiter);
+    api.use('/items/ludoscopio', strictLimiter);
   }
   api.use(express.json());
 
   api.use(createHealthRouter());
   api.use(createPublishedRouteRouter(publishedSiteRoot));
   api.use(createContactRouter(database));
-  api.use(createCatalogRouter(database, { embeddingClient, embeddingModel }));
+  api.use(createCatalogRouter(database, { embeddingClient, embeddingModel, ludoscopioInterpreter }));
   app.use('/api', api);
   app.use(jsonErrorHandler);
 
