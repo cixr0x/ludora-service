@@ -2,6 +2,9 @@ import { Router } from 'express';
 
 import type { Database } from '../db.js';
 
+const MAX_EVENT_ID = 9223372036854775807n;
+const bannerStatActions = new Set(['click', 'positive', 'negative', 'dismiss']);
+
 export function createEventsRouter(database: Database): Router {
   const router = Router();
 
@@ -12,6 +15,25 @@ export function createEventsRouter(database: Database): Router {
       response.json({ data: rows[0] ?? null });
     } catch (error) {
       next(new Error('Could not load the event banner', { cause: error }));
+    }
+  });
+
+  router.post('/events/:id/stats/:action', async (request, response, next) => {
+    const { id, action } = request.params;
+    if (!/^[1-9][0-9]{0,18}$/.test(id) || BigInt(id) > MAX_EVENT_ID || !bannerStatActions.has(action)) {
+      response.status(400).json({ error: { message: 'Invalid event ID or action' } });
+      return;
+    }
+
+    try {
+      const { rows } = await database.query(recordBannerStatSql, [id, action]);
+      if (rows.length === 0) {
+        response.status(404).json({ error: { message: 'Event not found' } });
+        return;
+      }
+      response.status(204).end();
+    } catch (error) {
+      next(new Error('Could not record the event banner action', { cause: error }));
     }
   });
 
@@ -37,3 +59,21 @@ const bannerEventSql = `
   order by events.starts_at, events.id
   limit 1
 `;
+
+const recordBannerStatSql = `insert into public.event_stats (event_id, date, click, positive, negative, dismiss)
+select events.id,
+       (now() at time zone 'America/Mexico_City')::date,
+       ($2::text = 'click')::integer,
+       ($2::text = 'positive')::integer,
+       ($2::text = 'negative')::integer,
+       ($2::text = 'dismiss')::integer
+from public.events
+where events.id = $1::bigint
+  and events.ends_at > now()
+  and events.starts_at < now() + interval '336 hours'
+on conflict (event_id, date) do update
+set click = event_stats.click + excluded.click,
+    positive = event_stats.positive + excluded.positive,
+    negative = event_stats.negative + excluded.negative,
+    dismiss = event_stats.dismiss + excluded.dismiss
+returning event_id;`;

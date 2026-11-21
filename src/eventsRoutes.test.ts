@@ -70,3 +70,68 @@ describe('homepage event banner', () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('homepage event banner statistics', () => {
+  it.each(['click', 'positive', 'negative', 'dismiss'])('records %s using a parameterized daily upsert', async action => {
+    const id = '9223372036854775807';
+    const query = vi.fn<Database['query']>().mockResolvedValue({ rows: [{ event_id: id }] });
+    const response = await request(createApp({ database: { query } })).post(`/api/events/${id}/stats/${action}`);
+
+    expect(response.status).toBe(204);
+    expect(response.text).toBe('');
+    expect(query).toHaveBeenCalledTimes(1);
+    const [sql, params] = query.mock.calls[0];
+    expect(params).toEqual([id, action]);
+    const statement = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+    expect(statement).toContain('insert into public.event_stats (event_id, date, click, positive, negative, dismiss)');
+    expect(statement).toContain("(now() at time zone 'america/mexico_city')::date");
+    expect(statement).toContain("where events.id = $1::bigint and events.ends_at > now() and events.starts_at < now() + interval '336 hours'");
+    expect(statement).toContain('on conflict (event_id, date) do update');
+    for (const counter of ['click', 'positive', 'negative', 'dismiss']) {
+      expect(statement).toContain(`($2::text = '${counter}')::integer`);
+      expect(statement).toContain(`${counter} = event_stats.${counter} + excluded.${counter}`);
+    }
+    expect(statement).toMatch(/returning event_id;$/);
+  });
+
+  it.each(['0', '01', '-1', '+1', '1.0', '1e3', ' 1', '1\n', '9223372036854775808'])('rejects a noncanonical or out-of-range ID %j', async id => {
+    const query = vi.fn<Database['query']>();
+    const response = await request(createApp({ database: { query } })).post(`/api/events/${encodeURIComponent(id)}/stats/click`);
+
+    expect(response.status).toBe(400);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it.each(['CLICK', 'impression'])('rejects the unknown action %s', async action => {
+    const query = vi.fn<Database['query']>();
+    const response = await request(createApp({ database: { query } })).post(`/api/events/1/stats/${action}`);
+
+    expect(response.status).toBe(400);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when no eligible event was updated', async () => {
+    const query = vi.fn<Database['query']>().mockResolvedValue({ rows: [] });
+    const response = await request(createApp({ database: { query } })).post('/api/events/1/stats/click');
+
+    expect(response.status).toBe(404);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a generic error when recording fails', async () => {
+    const query = vi.fn<Database['query']>().mockRejectedValue(new Error('Database connection details'));
+    const response = await request(createApp({ database: { query } })).post('/api/events/1/stats/click');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: { message: 'Could not record the event banner action' } });
+  });
+
+  it('shares the strict API rate limiter across banner actions and event IDs', async () => {
+    const query = vi.fn<Database['query']>().mockResolvedValue({ rows: [{ event_id: '1' }] });
+    const app = createApp({ database: { query }, publicApiStrictRateLimit: { windowMs: 60000, max: 1 } });
+
+    expect((await request(app).post('/api/events/1/stats/click')).status).toBe(204);
+    expect((await request(app).post('/api/events/2/stats/dismiss')).status).toBe(429);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+});

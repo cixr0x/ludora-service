@@ -58,6 +58,7 @@ export function createApp({
   if (publicApiStrictRateLimit) {
     const strictLimiter = createStrictPublicApiRateLimiter(publicApiStrictRateLimit);
     api.use('/contact', strictLimiter);
+    api.use('/events/:id/stats', strictLimiter);
     api.use('/store-items/:id/clicks', strictLimiter);
     api.use('/items/semantic-search', strictLimiter);
     api.use('/items/ludoscopio', strictLimiter);
