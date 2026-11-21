@@ -31,8 +31,8 @@ describe('complete SEO export', () => {
     expect(calls).toHaveLength(5);
     expect(calls[2].sql).toContain('and si.store_active = true');
     expect(calls[2].sql).toContain('and s.active = true');
-    expect(calls[2].sql).toContain("('unavailable', 'no_disponible', 'no disponible') then 2");
-    expect(calls[2].sql).not.toContain("and si.availability <> 'unavailable'");
+    expect(calls[2].sql).toContain("and translate(coalesce(si.availability, ''), U&'");
+    expect(calls[2].sql).toContain("!~* '^ *(unavailable|no(_|[ -]+)disponible) *$'");
     expect(calls[1].params).toEqual([200, 0, 90]);
     expect(calls[1].sql).toContain('i.id <= $3');
     expect(calls.slice(2).every(call => JSON.stringify(call.params?.[0]) === '[77]')).toBe(true);
