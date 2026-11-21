@@ -11,6 +11,7 @@ import {
 } from './rateLimit.js';
 import { createCatalogRouter } from './routes/catalog.js';
 import { createContactRouter } from './routes/contact.js';
+import { createEventsRouter } from './routes/events.js';
 import { createHealthRouter } from './routes/health.js';
 import { createPublishedRouteRouter } from './routes/publishedRoutes.js';
 
@@ -66,6 +67,7 @@ export function createApp({
   api.use(createHealthRouter());
   api.use(createPublishedRouteRouter(publishedSiteRoot));
   api.use(createContactRouter(database));
+  api.use(createEventsRouter(database));
   api.use(createCatalogRouter(database, { embeddingClient, embeddingModel, ludoscopioInterpreter }));
   app.use('/api', api);
   app.use(jsonErrorHandler);
