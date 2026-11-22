@@ -1,6 +1,9 @@
 import { Router } from 'express';
 
 import type { Database } from '../db.js';
+import { discoverySeedIds, discoverySql, distinctContributions, type DiscoveryResponse } from '../catalog/discovery.js';
+import { publicComplexitySql, relatedBaseGameConditions } from '../catalog/publicItem.js';
+import { guideParameters, guideSql } from '../catalog/guide.js';
 import { publicOfferAvailabilitySql } from '../catalog/offerVisibility.js';
 import type { EmbeddingClient } from '../embeddings.js';
 import {
@@ -234,6 +237,40 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
     }
   });
 
+  router.get('/items/discovery/guide', async (request, response, next) => {
+    const params = guideParameters(request.query);
+    if (!params) {
+      next(httpError(400, 'Invalid questionnaire answers'));
+      return;
+    }
+    try {
+      const result = await database.query(guideSql, params);
+      response.json({ data: result.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/items/discovery', async (request, response, next) => {
+    const { mode, ids } = request.query;
+    const seedIds = discoverySeedIds(mode, ids);
+    if (!seedIds || (mode !== 'similar' && mode !== 'mix')) {
+      next(httpError(400, 'Use one game for similar or two to three distinct games for mix'));
+      return;
+    }
+    try {
+      const result = await database.query(discoverySql(mode), [seedIds, 24]);
+      const data = result.rows[0] as DiscoveryResponse;
+      if (data.seeds.length !== seedIds.length) throw httpError(404, 'Selected game not found');
+      response.json({ data: mode === 'mix' ? {
+        seeds: data.seeds,
+        results: data.results.map(game => ({ ...game, sources: distinctContributions(game.sources) }))
+      } : data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/items/:id/stores', async (request, response, next) => {
     try {
       const itemId = integerPathParam(request.params.id);
@@ -332,10 +369,6 @@ export function createCatalogRouter(database: Database, options: CatalogRouterOp
 
   return router;
 }
-
-// Both catalog fields use the same 1–5 scale.
-const publicComplexitySql = `case when i.complexity between 1 and 5 then i.complexity
-  when i.weight between 1 and 5 then i.weight end`;
 
 const itemSelect = `
   i.id,
@@ -1278,10 +1311,7 @@ const relatedItemsSql = `
     ${relatedItemSelect}
   from related_scores rs
   join active_item i on i.id = rs.item_id
-  where i.has_approved_listing = true
-    and i.is_expansion = false
-    and i.item_type = 'base_game'
-    and i.parent_item_id is null
+  where ${relatedBaseGameConditions}
   order by rs.shared_taxonomy_count desc, i.rating desc nulls last, i.canonical_name asc, i.id asc
   limit $2
 `;
