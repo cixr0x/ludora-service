@@ -5,8 +5,8 @@ export type DiscoveryMode = 'similar' | 'mix';
 type Source = { seed_id: number; traits: { id: number; kind: string; name: string }[] };
 export type DiscoveryResponse = { seeds: unknown[]; results: { id: number; sources: Source[] }[] };
 
-// Each of at most three seeds has at most three ordered traits. Check all
-// assignments so a generic mechanic can contribute to only one source.
+// Three candidates per seed suffice for assigning three distinct representatives.
+// A source with at least three options can accommodate the other two choices.
 export function distinctContributions(sources: Source[]): Source[] {
   let best: Source[] = [];
   let bestCost = Infinity;
@@ -19,13 +19,24 @@ export function distinctContributions(sources: Source[]): Source[] {
       return;
     }
     const source = sources[index];
-    source.traits.forEach((trait, priority) => {
+    source.traits.slice(0, 3).forEach((trait, priority) => {
       if (assigned.some(match => match.traits[0].id === trait.id)) return;
       choose(index + 1, [...assigned, { seed_id: source.seed_id, traits: [trait] }], cost + priority);
     });
     choose(index + 1, assigned, cost);
   }
   choose(0, [], 0);
+  const used = new Set(best.map(source => source.traits[0].id));
+  for (let extra = 0; extra < 2; extra++) {
+    for (const source of best) {
+      const available = sources.find(candidate => candidate.seed_id === source.seed_id)?.traits;
+      const next = available?.find(trait => !used.has(trait.id));
+      if (next) {
+        source.traits.push(next);
+        used.add(next.id);
+      }
+    }
+  }
   return best;
 }
 
@@ -120,7 +131,7 @@ export function discoverySql(mode: DiscoveryMode): string {
     sources as (
       select item_id, seed_id,
         jsonb_agg(jsonb_build_object('id', trait_id, 'kind', kind, 'name', name) order by priority) as traits
-      from reasons where priority <= 3 group by item_id, seed_id
+      from reasons where priority <= ${mix ? 9 : 3} group by item_id, seed_id
     ),
     explanations as (
       select t.item_id,

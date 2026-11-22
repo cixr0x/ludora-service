@@ -2,8 +2,25 @@ import request from 'supertest';
 import { expect, it, vi } from 'vitest';
 import { createApp } from '../app.js';
 import type { Database } from '../db.js';
+import { distinctContributions } from './discovery.js';
 
 const endpoint = '/api/items/discovery';
+
+it('reserves one mechanic per credited seed before adding up to three different explanations each', () => {
+  const mechanics = ['Compra diferida', 'Trabajadores', 'Construcción de mazos', 'Cartas', 'Recursos', 'Acciones']
+    .map((name, index) => ({ id: index + 1, kind: 'mechanic', name }));
+  const [buy, workers, deck, cards, resources, actions] = mechanics;
+  const sources = [
+    { seed_id: 7, traits: [buy, workers, deck, cards, actions] },
+    { seed_id: 8, traits: [workers, resources, actions] },
+    { seed_id: 9, traits: [workers] },
+  ];
+  expect(distinctContributions(sources)).toEqual([
+    { seed_id: 7, traits: [buy, deck, cards] },
+    { seed_id: 8, traits: [resources, actions] },
+    { seed_id: 9, traits: [workers] },
+  ]);
+});
 
 it.each([
   'mode=mix&ids=7', 'mode=mix&ids=7,7', 'mode=mix&ids=1,2,3,4',
