@@ -805,8 +805,7 @@ const frontPageSql = `
 const frontPageStatsSql = `
   select
     (select count(*)::integer from active_item where has_approved_listing = true) as catalog_product_count,
-    (select count(*)::integer from stores
-     where active = true and (discovery_active = true or update_active = true)) as tracked_store_count
+    (select count(*)::integer from stores where active = true) as tracked_store_count
 `;
 
 type ItemSearchFilters = {

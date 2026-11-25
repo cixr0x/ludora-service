@@ -229,7 +229,7 @@ describe('ludora service', () => {
     expect(sql).not.toContain('select *');
     const statsSql = normalizeSql(queries[1] ?? '');
     expect(statsSql).toMatch(/count\(\*\).* from active_item .*has_approved_listing = true/);
-    expect(statsSql).toMatch(/count\(\*\).* from stores .*active = true and \(.*discovery_active = true or .*update_active = true\)/);
+    expect(statsSql).toContain('(select count(*)::integer from stores where active = true) as tracked_store_count');
   });
 
   it('still returns the front-page rows when aggregate counts are unavailable', async () => {
