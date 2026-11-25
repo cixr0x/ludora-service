@@ -1,7 +1,7 @@
 import cors from 'cors';
 import express, { Router, type ErrorRequestHandler, type Express } from 'express';
 
-import type { Database } from './db.js';
+import { isDatabaseUnavailable, type Database } from './db.js';
 import type { EmbeddingClient } from './embeddings.js';
 import type { LudoscopioInterpreter } from './ludoscopio.js';
 import {
@@ -83,6 +83,11 @@ const jsonErrorHandler: ErrorRequestHandler = (error, _request, response, _next)
         message: 'Invalid JSON body'
       }
     });
+    return;
+  }
+
+  if (isDatabaseUnavailable(error)) {
+    response.status(503).json({ error: { message: 'Database temporarily unavailable' } });
     return;
   }
 
