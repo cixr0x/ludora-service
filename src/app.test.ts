@@ -6,6 +6,34 @@ import type { Database } from './db.js';
 import type { EmbeddingClient } from './embeddings.js';
 
 describe('ludora service', () => {
+  it.each([
+    ['57014', 'canceling statement due to statement timeout'],
+    ['55P03', 'canceling statement due to lock timeout'],
+    ['25P03', 'terminating connection due to idle-in-transaction timeout'],
+    ['LUDORA_DB_BUSY', 'database pool is busy'],
+    [undefined, 'timeout exceeded when trying to connect'],
+    [undefined, 'Connection terminated due to connection timeout']
+  ])('returns 503 for a database timeout or overload (%s, %s)', async (code, message) => {
+    const database: Database = {
+      query: async () => { throw Object.assign(new Error(message), { code }); }
+    };
+
+    const response = await request(createApp({ database })).get('/api/front-page');
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({ error: { message: 'Database temporarily unavailable' } });
+  });
+
+  it('keeps unrelated database errors as server errors', async () => {
+    const database: Database = {
+      query: async () => { throw Object.assign(new Error('unexpected database failure'), { code: 'XX000' }); }
+    };
+
+    const response = await request(createApp({ database })).get('/api/front-page');
+
+    expect(response.status).toBe(500);
+  });
+
   const normalizeSql = (sql: string): string => sql.replace(/\s+/g, ' ').trim().toLowerCase();
 
   it('returns health status under the public api prefix', async () => {
