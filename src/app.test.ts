@@ -186,14 +186,23 @@ describe('ludora service', () => {
     const database: Database = {
       query: async (sql) => {
         queries.push(sql);
-        return { rows };
+        return {
+          rows: sql.includes('from front_page_categories fpc') ? rows : [{
+            catalog_product_count: 1234,
+            tracked_store_count: 45,
+            private_store_name: 'Internal test data'
+          }]
+        };
       }
     };
 
     const response = await request(createApp({ database })).get('/api/front-page');
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ data: rows });
+    expect(response.body).toEqual({
+      data: rows,
+      meta: { catalog_product_count: 1234, tracked_store_count: 45 }
+    });
     const sql = normalizeSql(queries[0] ?? '');
     expect(sql).toContain('from front_page_categories fpc');
     expect(sql).toContain('fpc.title_display');
@@ -218,6 +227,58 @@ describe('ludora service', () => {
     expect(sql).toContain('order by i.rating desc nulls last, fpci.item_order asc, i.canonical_name asc, i.id asc');
     expect(sql).toContain('order by fpc."order" asc, fpc.id asc');
     expect(sql).not.toContain('select *');
+    const statsSql = normalizeSql(queries[1] ?? '');
+    expect(statsSql).toMatch(/count\(\*\).* from active_item .*has_approved_listing = true/);
+    expect(statsSql).toMatch(/count\(\*\).* from stores .*active = true and \(.*discovery_active = true or .*update_active = true\)/);
+  });
+
+  it('still returns the front-page rows when aggregate counts are unavailable', async () => {
+    const rows = [{ id: 1, title: 'Noche de juegos', products: [] }];
+    const database: Database = {
+      query: async (sql) => {
+        if (sql.includes('from front_page_categories fpc')) return { rows };
+        throw new Error('stats query unavailable');
+      }
+    };
+
+    const response = await request(createApp({ database })).get('/api/front-page');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: rows });
+  });
+
+  it('returns front-page rows promptly and shares a stalled aggregate query', async () => {
+    const rows = [{ id: 1, title: 'Noche de juegos', products: [] }];
+    const counts = { catalog_product_count: 1234, tracked_store_count: 45 };
+    let completeStats!: (value: { rows: unknown[] }) => void;
+    const pendingStats = new Promise<{ rows: unknown[] }>(resolve => { completeStats = resolve; });
+    let statsQueries = 0;
+    const database: Database = {
+      query: async sql => {
+        if (sql.includes('from front_page_categories fpc')) return { rows };
+        if (++statsQueries === 1) return pendingStats;
+        return { rows: [counts] };
+      }
+    };
+    const app = createApp({ database });
+
+    try {
+      const responses = await Promise.all([
+        request(app).get('/api/front-page').timeout({ deadline: 1500 }),
+        request(app).get('/api/front-page').timeout({ deadline: 1500 })
+      ]);
+      for (const response of responses) {
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ data: rows });
+      }
+      expect(await request(app).get('/api/front-page')).toMatchObject({ status: 200, body: { data: rows } });
+      expect(statsQueries).toBe(1);
+    } finally {
+      completeStats({ rows: [counts] });
+    }
+
+    const recovered = await request(app).get('/api/front-page');
+    expect(recovered.body).toEqual({ data: rows, meta: counts });
   });
 
   it('lists active items with taxonomy arrays and text search', async () => {

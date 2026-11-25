@@ -22,18 +22,50 @@ type CatalogRouterOptions = {
   ludoscopioInterpreter?: LudoscopioInterpreter;
 };
 
+type FrontPageStats = {
+  catalog_product_count: number;
+  tracked_store_count: number;
+};
+
 const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
 const MAX_SEMANTIC_DISTANCE = 0.62;
+const FRONT_PAGE_STATS_WAIT_MS = 500;
 const LUDOSCOPIO_GAME_WORD = /(?<![\p{L}\p{M}\p{N}\p{Pc}])juegos?(?![\p{L}\p{M}\p{N}\p{Pc}])/iu;
 
 export function createCatalogRouter(database: Database, options: CatalogRouterOptions = {}): Router {
   const router = Router();
   const embeddingModel = options.embeddingModel ?? DEFAULT_EMBEDDING_MODEL;
+  let pendingFrontPageStats: Promise<FrontPageStats | undefined> | undefined;
+
+  function readFrontPageStats() {
+    if (pendingFrontPageStats) return pendingFrontPageStats;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<undefined>(resolve => {
+      timer = setTimeout(() => resolve(undefined), FRONT_PAGE_STATS_WAIT_MS).unref();
+    });
+    const query = database.query(frontPageStatsSql)
+      .then(result => result.rows[0] as FrontPageStats | undefined)
+      .catch(() => undefined)
+      .finally(() => {
+        clearTimeout(timer);
+        // Keep sharing the timed-out result while the database query is still pending.
+        pendingFrontPageStats = undefined;
+      });
+    pendingFrontPageStats = Promise.race([query, timeout]);
+    return pendingFrontPageStats;
+  }
 
   router.get('/front-page', async (_request, response, next) => {
     try {
-      const result = await database.query(frontPageSql);
-      response.json({ data: result.rows });
+      const [result, stats] = await Promise.all([database.query(frontPageSql), readFrontPageStats()]);
+      response.json({
+        data: result.rows,
+        meta: stats && {
+          catalog_product_count: stats.catalog_product_count,
+          tracked_store_count: stats.tracked_store_count
+        }
+      });
     } catch (error) {
       next(error);
     }
@@ -768,6 +800,13 @@ const frontPageSql = `
   left join active_item i on i.id = fpci.item_id
   group by fpc.id, bc.name, bc.name_es, bf.name, bf.name_es, bm.name, bm.name_es
   order by fpc."order" asc, fpc.id asc
+`;
+
+const frontPageStatsSql = `
+  select
+    (select count(*)::integer from active_item where has_approved_listing = true) as catalog_product_count,
+    (select count(*)::integer from stores
+     where active = true and (discovery_active = true or update_active = true)) as tracked_store_count
 `;
 
 type ItemSearchFilters = {
