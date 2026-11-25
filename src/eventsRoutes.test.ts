@@ -61,6 +61,17 @@ describe('homepage event banner', () => {
     expect(response.body).toEqual({ error: { message: 'Could not load the event banner' } });
   });
 
+  it('returns 503 when the event query exceeds its PostgreSQL deadline', async () => {
+    const query = vi.fn<Database['query']>().mockRejectedValue(
+      Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' })
+    );
+    const response = await request(createApp({ database: { query } })).get(endpoint);
+
+    expect(response.status).toBe(503);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body).toEqual({ error: { message: 'Database temporarily unavailable' } });
+  });
+
   it('uses the shared public API rate limiter', async () => {
     const query = vi.fn<Database['query']>().mockResolvedValue({ rows: [] });
     const app = createApp({ database: { query }, publicApiRateLimit: { windowMs: 60000, max: 1 } });
@@ -124,6 +135,16 @@ describe('homepage event banner statistics', () => {
 
     expect(response.status).toBe(500);
     expect(response.body).toEqual({ error: { message: 'Could not record the event banner action' } });
+  });
+
+  it('returns 503 when the event statistics write exceeds its lock deadline', async () => {
+    const query = vi.fn<Database['query']>().mockRejectedValue(
+      Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' })
+    );
+    const response = await request(createApp({ database: { query } })).post('/api/events/1/stats/click');
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({ error: { message: 'Database temporarily unavailable' } });
   });
 
   it('shares the strict API rate limiter across banner actions and event IDs', async () => {

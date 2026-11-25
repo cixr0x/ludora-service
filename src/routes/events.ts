@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import type { Database } from '../db.js';
+import { isDatabaseUnavailable, type Database } from '../db.js';
 
 const MAX_EVENT_ID = 9223372036854775807n;
 const bannerStatActions = new Set(['click', 'positive', 'negative', 'dismiss']);
@@ -14,7 +14,7 @@ export function createEventsRouter(database: Database): Router {
       const { rows } = await database.query(bannerEventSql);
       response.json({ data: rows[0] ?? null });
     } catch (error) {
-      next(new Error('Could not load the event banner', { cause: error }));
+      next(isDatabaseUnavailable(error) ? error : new Error('Could not load the event banner', { cause: error }));
     }
   });
 
@@ -33,7 +33,7 @@ export function createEventsRouter(database: Database): Router {
       }
       response.status(204).end();
     } catch (error) {
-      next(new Error('Could not record the event banner action', { cause: error }));
+      next(isDatabaseUnavailable(error) ? error : new Error('Could not record the event banner action', { cause: error }));
     }
   });
 
