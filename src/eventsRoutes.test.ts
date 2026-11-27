@@ -83,7 +83,9 @@ describe('homepage event banner', () => {
 });
 
 describe('homepage event banner statistics', () => {
-  it.each(['click', 'positive', 'negative', 'dismiss'])('records %s using a parameterized daily upsert', async action => {
+  const counters = ['click', 'positive', 'negative', 'dismiss', 'impression'];
+
+  it.each(counters)('records %s using a parameterized daily upsert', async action => {
     const id = '9223372036854775807';
     const query = vi.fn<Database['query']>().mockResolvedValue({ rows: [{ event_id: id }] });
     const response = await request(createApp({ database: { query } })).post(`/api/events/${id}/stats/${action}`);
@@ -94,11 +96,11 @@ describe('homepage event banner statistics', () => {
     const [sql, params] = query.mock.calls[0];
     expect(params).toEqual([id, action]);
     const statement = sql.replace(/\s+/g, ' ').trim().toLowerCase();
-    expect(statement).toContain('insert into public.event_stats (event_id, date, click, positive, negative, dismiss)');
+    expect(statement).toContain('insert into public.event_stats (event_id, date, click, positive, negative, dismiss, impression)');
     expect(statement).toContain("(now() at time zone 'america/mexico_city')::date");
     expect(statement).toContain("where events.id = $1::bigint and events.ends_at > now() and events.starts_at < now() + interval '336 hours'");
     expect(statement).toContain('on conflict (event_id, date) do update');
-    for (const counter of ['click', 'positive', 'negative', 'dismiss']) {
+    for (const counter of counters) {
       expect(statement).toContain(`($2::text = '${counter}')::integer`);
       expect(statement).toContain(`${counter} = event_stats.${counter} + excluded.${counter}`);
     }
@@ -113,7 +115,7 @@ describe('homepage event banner statistics', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it.each(['CLICK', 'impression'])('rejects the unknown action %s', async action => {
+  it.each(['CLICK', 'IMPRESSION'])('rejects the unknown action %s', async action => {
     const query = vi.fn<Database['query']>();
     const response = await request(createApp({ database: { query } })).post(`/api/events/1/stats/${action}`);
 
@@ -123,7 +125,7 @@ describe('homepage event banner statistics', () => {
 
   it('returns 404 when no eligible event was updated', async () => {
     const query = vi.fn<Database['query']>().mockResolvedValue({ rows: [] });
-    const response = await request(createApp({ database: { query } })).post('/api/events/1/stats/click');
+    const response = await request(createApp({ database: { query } })).post('/api/events/1/stats/impression');
 
     expect(response.status).toBe(404);
     expect(query).toHaveBeenCalledTimes(1);
@@ -152,7 +154,7 @@ describe('homepage event banner statistics', () => {
     const app = createApp({ database: { query }, publicApiStrictRateLimit: { windowMs: 60000, max: 1 } });
 
     expect((await request(app).post('/api/events/1/stats/click')).status).toBe(204);
-    expect((await request(app).post('/api/events/2/stats/dismiss')).status).toBe(429);
+    expect((await request(app).post('/api/events/2/stats/impression')).status).toBe(429);
     expect(query).toHaveBeenCalledTimes(1);
   });
 });

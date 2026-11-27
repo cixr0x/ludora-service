@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { isDatabaseUnavailable, type Database } from '../db.js';
 
 const MAX_EVENT_ID = 9223372036854775807n;
-const bannerStatActions = new Set(['click', 'positive', 'negative', 'dismiss']);
+const bannerStatActions = new Set(['click', 'positive', 'negative', 'dismiss', 'impression']);
 
 export function createEventsRouter(database: Database): Router {
   const router = Router();
@@ -60,13 +60,14 @@ const bannerEventSql = `
   limit 1
 `;
 
-const recordBannerStatSql = `insert into public.event_stats (event_id, date, click, positive, negative, dismiss)
+const recordBannerStatSql = `insert into public.event_stats (event_id, date, click, positive, negative, dismiss, impression)
 select events.id,
        (now() at time zone 'America/Mexico_City')::date,
        ($2::text = 'click')::integer,
        ($2::text = 'positive')::integer,
        ($2::text = 'negative')::integer,
-       ($2::text = 'dismiss')::integer
+       ($2::text = 'dismiss')::integer,
+       ($2::text = 'impression')::integer
 from public.events
 where events.id = $1::bigint
   and events.ends_at > now()
@@ -75,5 +76,6 @@ on conflict (event_id, date) do update
 set click = event_stats.click + excluded.click,
     positive = event_stats.positive + excluded.positive,
     negative = event_stats.negative + excluded.negative,
-    dismiss = event_stats.dismiss + excluded.dismiss
+    dismiss = event_stats.dismiss + excluded.dismiss,
+    impression = event_stats.impression + excluded.impression
 returning event_id;`;
